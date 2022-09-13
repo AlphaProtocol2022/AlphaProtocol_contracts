@@ -176,7 +176,7 @@ contract InvestmentController is IInvestmentController, Operator {
         //add event
     }
 
-    // TODO NOt worked, changed = 0 under exitStrategy => worked
+    // Functions to exit strategy and return collateral to @collateralFund
     function exitStrategy(uint256 _sid) public override onlyOperator {
         require(_sid < strategies.length, "Strategy Not Existed");
         Strategy storage strategy = strategies[_sid];
