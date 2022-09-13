@@ -48,6 +48,17 @@ contract InvestmentController is IInvestmentController, Operator {
 
     bool initialized = false;
 
+    /* ========== EVENTS ========== */
+
+    event Invest(address indexed strategy, uint256 amount);
+    event Recollateralized(address indexed strategy, uint256 amount);
+    event ExitStrategy(address indexed strategy);
+    event DistributeReward(address indexed rewardToken, uint256 amount);
+    event NewStrategyAdded(address indexed strategy);
+
+    /* ============================ */
+
+
     function initializing(
         address _treasury,
         address _assetController,
@@ -163,7 +174,8 @@ contract InvestmentController is IInvestmentController, Operator {
         require(_amount <= tokenBalance(_collateral), "Exceed current balance");
         IERC20(_collateral).safeTransfer(strategy.contractAddress, _amount);
         strategy.investedAmount = strategy.investedAmount.add(_amount);
-        // add event
+
+        emit Invest(strategy.contractAddress, _amount);
     }
 
     // Call only by Strategy when Strategy returns funds.
@@ -173,7 +185,8 @@ contract InvestmentController is IInvestmentController, Operator {
         require(_hasPool, "!strategy");
         Strategy storage strategy = strategies[_sid];
         strategy.investedAmount = strategy.investedAmount.sub(_amount);
-        //add event
+
+        emit Recollateralized(strategy.contractAddress, _amount);
     }
 
     // Functions to exit strategy and return collateral to @collateralFund
@@ -183,6 +196,8 @@ contract InvestmentController is IInvestmentController, Operator {
 
         IGeneralStrategy(strategy.contractAddress).exitStrategy();
         strategy.investedAmount = 0;
+
+        emit ExitStrategy(strategy.contractAddress);
     }
 
     function claimReward(uint256 _sid, uint256 _amount) public override onlyOperator {
@@ -207,7 +222,8 @@ contract InvestmentController is IInvestmentController, Operator {
 
         IERC20(strategy.rewardToken).safeTransfer(rewardDistributor, holders_profits);
         IERC20(strategy.rewardToken).safeTransfer(devFund, dev_fund_profits);
-        // add event
+
+        emit DistributeReward(strategy.rewardToken, _amount);
     }
 
     function getStrategyByContract(address _contractAddress) internal view returns (uint256 _strategyId, bool _hasPool) {
@@ -242,7 +258,8 @@ contract InvestmentController is IInvestmentController, Operator {
         totalDistributedReward : 0,
         paused : _paused
         }));
-        //add event
+
+        emit NewStrategyAdded(_strategy_address);
     }
 
     function sendToCollateralFund(uint256 _amount, uint256 _assetId) public onlyOperator {
