@@ -12,8 +12,7 @@ contract XShareSinglePool is Operator {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
-    // governance
-    address public operator;
+    // Reward Distributor
     address public rewardReserve;
 
     // Info of each user.
