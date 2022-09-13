@@ -171,7 +171,7 @@ contract XShareSinglePool {
     }
 
     // Update reward variables of the given pool to be up-to-date.
-    function updatePool(uint256 _pid) public {
+    function updatePool(uint256 _pid) internal {
         PoolInfo storage pool = poolInfo[_pid];
         if (block.timestamp <= pool.lastRewardTime) {
             return;
