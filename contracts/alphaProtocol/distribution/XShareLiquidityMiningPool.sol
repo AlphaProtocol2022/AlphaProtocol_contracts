@@ -11,9 +11,6 @@ contract XShareLiquidityMiningPool is Operator {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
-    // governance
-    address public operator;
-
     // Info of each user.
     struct UserInfo {
         uint256 amount; // How many LP tokens the user has provided.
