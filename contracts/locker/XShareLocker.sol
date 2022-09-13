@@ -134,25 +134,25 @@ contract XShareLocker is Operator, IXShareLocker {
     }
 
     //If User has locked XShare before, user can extend their lock duration to receive more yShare
-    function extendLockDuration(uint256 extendLockDuration) public override validDuration(extendLockDuration) {
+    function extendLockDuration(uint256 _extendLockDuration) public override validDuration(_extendLockDuration) {
         address _sender = msg.sender;
         UserInfo storage user = userInfo[_sender];
         require(isLocked(_sender), "Lock ended");
-        require(user.lockDuration.add(extendLockDuration) <= MAX_LOCK_DURATION, "Exceed max lock duration");
+        require(user.lockDuration.add(_extendLockDuration) <= MAX_LOCK_DURATION, "Exceed max lock duration");
 
         uint256 currentLockedAmount = user.lockedAmount;
-        uint256 totalYShareSupposedToMint = calculateYShareMintAmount(user.lockedAmount, user.lockDuration.add(extendLockDuration));
+        uint256 totalYShareSupposedToMint = calculateYShareMintAmount(user.lockedAmount, user.lockDuration.add(_extendLockDuration));
         uint256 extraYShareAmount = totalYShareSupposedToMint.sub(user.yShareMinted);
 
         IYShare(yShare).lockerMintFrom(msg.sender, extraYShareAmount);
 
-        user.lockEndTime = user.lockEndTime.add(extendLockDuration);
+        user.lockEndTime = user.lockEndTime.add(_extendLockDuration);
         user.yShareMinted = user.yShareMinted.add(extraYShareAmount);
-        user.lockDuration = user.lockDuration.add(extendLockDuration);
+        user.lockDuration = user.lockDuration.add(_extendLockDuration);
         totalYShareMinted = totalYShareMinted.add(extraYShareAmount);
         updateAverageLockDuration();
 
-        emit ExtendLockDuration(_sender, extendLockDuration);
+        emit ExtendLockDuration(_sender, _extendLockDuration);
     }
 
     function unlockXShare(uint256 amount) public override {
