@@ -5,8 +5,9 @@ pragma solidity >=0.6.12;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "../../Operator.sol";
 
-contract XShareLiquidityMiningPool {
+contract XShareLiquidityMiningPool is Operator {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
@@ -69,13 +70,7 @@ contract XShareLiquidityMiningPool {
         xshare = IERC20(_xshare);
         poolStartTime = _poolStartTime;
         poolEndTime = poolStartTime + runningTime;
-        operator = msg.sender;
         xSharePerSecond = INITIAL_XSHARE_PER_SECOND;
-    }
-
-    modifier onlyOperator() {
-        require(operator == msg.sender, "xShareRewardPool: caller is not the operator");
-        _;
     }
 
     function checkPoolDuplicate(IERC20 _token) internal view {
@@ -272,10 +267,6 @@ contract XShareLiquidityMiningPool {
                 xshare.safeTransfer(_to, _amount);
             }
         }
-    }
-
-    function setOperator(address _operator) external onlyOperator {
-        operator = _operator;
     }
 
     function updateXSharePerSec(uint256 _new_xSharePerSec) public onlyOperator {

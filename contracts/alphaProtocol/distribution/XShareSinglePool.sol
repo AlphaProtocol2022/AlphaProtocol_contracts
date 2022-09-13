@@ -6,8 +6,9 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "./../../interfaces/ICurrencyReserve.sol";
+import "../../Operator.sol";
 
-contract XShareSinglePool {
+contract XShareSinglePool is Operator {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
@@ -65,13 +66,7 @@ contract XShareSinglePool {
         xShare = IERC20(_xshare);
         poolStartTime = _poolStartTime;
         poolEndTime = poolStartTime + runningTime;
-        operator = msg.sender;
         xSharePerSecond = TOTAL_REWARDS.div(runningTime);
-    }
-
-    modifier onlyOperator() {
-        require(operator == msg.sender, "xShareRewardPool: caller is not the operator");
-        _;
     }
 
     function checkPoolDuplicate(IERC20 _token) internal view {
@@ -260,10 +255,6 @@ contract XShareSinglePool {
     function updateXSharePerSecond(uint256 _new_emission) external onlyOperator {
         require(_new_emission >= 0, "Invalid amount");
         xSharePerSecond = _new_emission;
-    }
-
-    function setOperator(address _operator) external onlyOperator {
-        operator = _operator;
     }
 
     function setRewardReserve(address _rewardReserve) external onlyOperator {
