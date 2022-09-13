@@ -228,7 +228,7 @@ contract XShareLocker is Operator, IXShareLocker {
         }
     }
 
-    function calculateYShareMintAmount(uint256 amount, uint256 lockDuration) internal returns (uint256){
+    function calculateYShareMintAmount(uint256 amount, uint256 lockDuration) internal view returns (uint256){
         uint256 boost_amount_factor = lockDuration.div(MIN_LOCK_DURATION);
         uint256 extra_yShare_per_xShare = EXTRA_YSHARE_PER_WEEK.mul(boost_amount_factor);
         uint256 actual_extra_yShare = amount.mul(extra_yShare_per_xShare).div(1e18);
@@ -239,7 +239,7 @@ contract XShareLocker is Operator, IXShareLocker {
     }
 
     //Method to round up to 4 digit
-    function ceil(uint256 _amount) internal returns (uint256){
+    function ceil(uint256 _amount) internal pure returns (uint256){
         return (_amount.add(1e14).sub(1)).div(1e14).mul(1e14);
     }
 
