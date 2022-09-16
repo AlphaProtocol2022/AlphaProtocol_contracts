@@ -15,6 +15,8 @@ contract XShareLiquidityMiningPool is Operator {
     struct UserInfo {
         uint256 amount; // How many LP tokens the user has provided.
         uint256 rewardDebt; // Reward debt. See explanation below.
+        uint256 depositTimestamp; // Deposit Timestamp
+        uint256 withdrawTimestamp; // Withdraw Timestamp
     }
 
     // Info of each pool.
@@ -49,9 +51,8 @@ contract XShareLiquidityMiningPool is Operator {
     uint256 public constant MAX_TAX_RATE = 400; // Max = 400/10000*100 = 4%
 
     uint256 public xSharePerSecond;
-    uint256 public runningTime = 1095 days; // 3 years
-    uint256 public constant TOTAL_REWARDS = 65000000 ether; // 65.000.000 xShare
-    uint256 public constant INITIAL_XSHARE_PER_SECOND = 0.343522756 ether; // 50% of emissino at start, please read xShare tokenomics
+    uint256 public runningTime = 365 days; // 3 years
+    uint256 public constant TOTAL_REWARDS = 70000000 ether; // 65.000.000 xShare
 
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
@@ -67,7 +68,7 @@ contract XShareLiquidityMiningPool is Operator {
         xshare = IERC20(_xshare);
         poolStartTime = _poolStartTime;
         poolEndTime = poolStartTime + runningTime;
-        xSharePerSecond = INITIAL_XSHARE_PER_SECOND;
+        xSharePerSecond = TOTAL_REWARDS.div(runningTime);
     }
 
     function checkPoolDuplicate(IERC20 _token) internal view {
@@ -206,6 +207,11 @@ contract XShareLiquidityMiningPool is Operator {
             }
         }
         if (_amount > 0) {
+            if (user.amount == 0) {
+                // start record deposit timestamp.
+                user.depositTimestamp = block.timestamp;
+                user.withdrawTimestamp = block.timestamp;
+            }
             uint256 _taxRate = pool.taxRate;
             uint256 _taxAmount = 0;
             if (_taxRate > 0) {
@@ -236,6 +242,10 @@ contract XShareLiquidityMiningPool is Operator {
         if (_amount > 0) {
             user.amount = user.amount.sub(_amount);
             pool.token.safeTransfer(_sender, _amount);
+            if (user.amount == 0) {
+                // If user withdraw all => record withdrawTimestamp
+                user.withdrawTimestamp = block.timestamp;
+            }
         }
         user.rewardDebt = user.amount.mul(pool.accXSharePerShare).div(1e18);
         emit Withdraw(_sender, _pid, _amount);

@@ -48,8 +48,8 @@ contract XShareSinglePool is Operator {
     uint256 public poolEndTime;
 
     uint256 public xSharePerSecond;
-    uint256 public runningTime = 1095 days; // 3 years
-    uint256 public constant TOTAL_REWARDS = 7000000 ether; // 7.000.000 xSHare
+    uint256 public runningTime = 365 days; // 3 years
+    uint256 public constant TOTAL_REWARDS = 5000000 ether; // 7.000.000 xSHare
 
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
