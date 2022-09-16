@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.6.12;
+pragma solidity >=0.6.12;
 
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
@@ -13,15 +13,13 @@ contract XShare is ERC20Burnable, Operator {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
-    // TOTAL MAX SUPPLY = 100.000.000 xShare
-    uint256 public constant LIQUIDITY_MINING_ALLOCATION = 65000000 ether; // 65.000.000 xShare
-    uint256 public constant POOL_ALLOCATION = 7000000 ether; // 7.000.000 xShare
-    uint256 public constant DEV_FUND_ALLOCATION = 12000000 ether; // 12.000.000 xShare
-    uint256 public constant PROJECT_TREASURY_ALLOCATION = 12000000 ether; // 12.000.000 xShare
-    uint256 public constant ADVISOR_ALLOCATION = 1000000 ether; // 1.000.000 xShare
-    uint256 public constant PRIVATE_SALE_ALLOCATION = 500000 ether; // 500.000 xShare
-    uint256 public constant PUBLIC_SALE_ALLOCATION = 1500000 ether; // 1.500.000 xShare
-    uint256 public constant INITIAL_LIQUIDITY_ALLOCATION = 1000000 ether; // 1.000.000 xShare
+    // TOTAL SUPPLY = 100.000.000 xShare
+    uint256 public constant LIQUIDITY_MINING_ALLOCATION = 70000000 ether; // 70.000.000 xShare
+    uint256 public constant POOL_ALLOCATION = 5000000 ether; // 5.000.000 xShare
+    uint256 public constant DEV_FUND_ALLOCATION = 12980000 ether; // 13.000.000 xShare
+    uint256 public constant PROJECT_TREASURY_ALLOCATION = 10000000 ether; // 10.000.000 xShare
+    uint256 public constant ADVISOR_ALLOCATION = 2000000 ether; // 2.0000.000 xShare
+    uint256 public constant INITIAL_LIQUIDITY_ALLOCATION = 20000 ether; // 20.000 xShare
 
     IMultiAssetTreasury public treasury;
 
@@ -42,8 +40,7 @@ contract XShare is ERC20Burnable, Operator {
     uint256 public lastClaimedTime;
 
     bool public rewardPoolDistributed = false;
-    bool public privateSaleDistributed = false;
-    bool public publicSaleDistributed = false;
+    bool public advisorRewardDistributed = false;
 
     modifier onlyPools() {
         require(IMultiAssetTreasury(treasury).hasPool(msg.sender), "!pools");
@@ -58,9 +55,11 @@ contract XShare is ERC20Burnable, Operator {
 
     event DaoClaimRewards(uint256 paid);
     event DevClaimRewards(uint256 paid);
+    event FarmRewardDistribute(address indexed farmContract, address indexed poolReserve);
+    event AdvisorRewardDistribute(address indexed vestingContract);
 
-    constructor(IMultiAssetTreasury _treasury, uint256 _startTime, address _devFund, address _daoFund) public ERC20("10SHARE", "10SHARE") {
-        _mint(_devFund, 50 ether);
+    constructor(IMultiAssetTreasury _treasury, uint256 _startTime, address _devFund, address _daoFund) public ERC20("XSHARE", "XSHARE") {
+        _mint(msg.sender, INITIAL_LIQUIDITY_ALLOCATION);
 
         startTime = _startTime;
         endTime = startTime + VESTING_DURATION;
@@ -79,29 +78,25 @@ contract XShare is ERC20Burnable, Operator {
         treasury = _treasury;
     }
 
-    function distributeReward(address _farmingIncentiveFund, address _poolContract, address _advisorVestingContract) external onlyOperator {
+    function distributeReward(address _farmingIncentiveFund, address _poolReserve) external onlyOperator {
         require(!rewardPoolDistributed, "only can distribute once");
         require(_farmingIncentiveFund != address(0), "!_farmingIncentiveFund");
-        require(_poolContract != address(0), "!_poolContract");
+        require(_poolReserve != address(0), "!_poolContract");
         require(_advisorVestingContract != address(0), "!_advisorVestingContract");
         rewardPoolDistributed = true;
         _mint(_farmingIncentiveFund, LIQUIDITY_MINING_ALLOCATION);
-        _mint(_poolContract, POOL_ALLOCATION);
-        _mint(_advisorVestingContract, ADVISOR_ALLOCATION);
+        _mint(_poolReserve, POOL_ALLOCATION);
+
+        emit FarmRewardDistribute(_farmingIncentiveFund, _poolReserve);
     }
 
-    function distributePrivateSale(address _privateSaleContract) external onlyOperator {
-        require(!privateSaleDistributed, "only can distribute once");
-        require(_privateSaleContract != address(0), "invalid address");
-        privateSaleDistributed = true;
-        _mint(_privateSaleContract, PRIVATE_SALE_ALLOCATION);
-    }
+    function disitributeAdvisorFund(address _vestingContract) external onlyOperator {
+        require(!advisorRewardDistributed, "only can distribute once");
+        require(_vestingContract != address(0), "invalid address");
+        advisorRewardDistributed = true;
+        _mint(_vestingContract, ADVISOR_ALLOCATION);
 
-    function distributePublicSale(address _publicSaleContract) external onlyOperator {
-        require(!privateSaleDistributed, "only can distribute once");
-        require(_publicSaleContract != address(0), "invalid address");
-        privateSaleDistributed = true;
-        _mint(_publicSaleContract, PUBLIC_SALE_ALLOCATION);
+        emit AdvisorRewardDistribute(_vestingContract);
     }
 
     function circulatingSupply() public view returns (uint256) {
