@@ -32,6 +32,7 @@ contract MultiAssetTreasury is IMultiAssetTreasury, Operator, ReentrancyGuard {
         uint256 effective_collateral_ratio; // 6 decimals of precision
         uint256 price_band; // 6 decimals of precision
         uint256 missing_decimals; // Number of decimals needed to get to 18
+        uint256 price_target;
     }
 
     mapping(uint256 => CollateralPolicy) public assetCollateralPolicy; // Map assetId to Collateral policy
@@ -74,7 +75,6 @@ contract MultiAssetTreasury is IMultiAssetTreasury, Operator, ReentrancyGuard {
     uint256 public constant MIN_REFRESH_COOLDOWN = 1800;
     uint256 public constant MAX_REFRESH_COOLDOWN = 3600;
     uint256 public ratio_step; // Amount to change the collateralization ratio by upon refreshCollateralRatio()
-    uint256 public price_target; // Every Asset are pegged to the value of it's collateral. This will be hardcoded at 1
     bool public collateral_ratio_paused = false; // Manage collateral ratio adjustment
     bool public using_effective_collateral_ratio = true; // toggle the effective collateral ratio usage
     uint256 private constant COLLATERAL_RATIO_MAX = 1e6; // Max 100% Ratio
@@ -93,8 +93,8 @@ contract MultiAssetTreasury is IMultiAssetTreasury, Operator, ReentrancyGuard {
         last_rebalance_timestamp = _blockTimestamp;
     }
 
-    modifier onlyAssetController() {
-        require(msg.sender == assetController, "!AssetController");
+    modifier onlyAssetControllerOrOperator() {
+        require(msg.sender == assetController || msg.sender == operator(), "!AssetController");
         _;
     }
 
@@ -115,8 +115,6 @@ contract MultiAssetTreasury is IMultiAssetTreasury, Operator, ReentrancyGuard {
         // = 0.25% at 6 decimals of precision
         refresh_cooldown = 3600;
         // Refresh cooldown period is set to 1 hour (3600 seconds) at genesis
-        price_target = 1000000;
-        // = $1. (6 decimals of precision). Collateral ratio will adjust according to the $1 price target at genesis
         redemption_fee = 4000;
         minting_fee = 3000;
         router = _router;
@@ -132,7 +130,7 @@ contract MultiAssetTreasury is IMultiAssetTreasury, Operator, ReentrancyGuard {
         collateralFund = _collateralFund;
         daoFund = _daoFund;
         assetController = _assetController;
-
+        collateral_ratio_paused = true;
         initialized = true;
     }
 
@@ -282,8 +280,9 @@ contract MultiAssetTreasury is IMultiAssetTreasury, Operator, ReentrancyGuard {
             uint256 _tcr = _collateralPolicy.target_collateral_ratio;
             uint256 _ecr = _collateralPolicy.effective_collateral_ratio;
             uint256 _price_band = _collateralPolicy.price_band;
+            uint256 _price_target = _collateralPolicy.price_target;
             // Step increments are 0.25% (upon genesis, changable by setRatioStep())
-            if (current_asset_price > price_target.add(_price_band)) {
+            if (current_asset_price > _price_target.add(_price_band)) {
                 // decrease collateral ratio
                 if (_tcr <= ratio_step) {
                     // if within a step of 0, go to 0
@@ -293,7 +292,7 @@ contract MultiAssetTreasury is IMultiAssetTreasury, Operator, ReentrancyGuard {
                 }
             }
             // If Asset/Collateral price below 1 - `price_band`. Need to increase `target_collateral_ratio`
-            else if (current_asset_price < price_target.sub(_price_band)) {
+            else if (current_asset_price < _price_target.sub(_price_band)) {
                 // increase collateral ratio
                 if (_tcr.add(ratio_step) >= COLLATERAL_RATIO_MAX) {
                     _collateralPolicy.target_collateral_ratio = COLLATERAL_RATIO_MAX;
@@ -353,7 +352,7 @@ contract MultiAssetTreasury is IMultiAssetTreasury, Operator, ReentrancyGuard {
         // Validating path: input token must be collateral of asset and output token must be xShare
         require(path[path.length - 1] == share, "Output Token must be xShare");
         address _collateral = IAssetController(assetController).getCollateral(_assetId);
-        require(path[0] == share, "Input Token must be collateral of selected asset");
+        require(path[0] == _collateral, "Input Token must be collateral of selected asset");
 
         // Convert into dollar value (18 decimals)
         uint256 _collateral_value = calcCollateralValue(_collateral_amount, _assetId);
@@ -400,12 +399,13 @@ contract MultiAssetTreasury is IMultiAssetTreasury, Operator, ReentrancyGuard {
     }
 
     // Add asset CollateralPolicy - Only called by AssetController
-    function addCollateralPolicy(uint256 _aid, uint256 _price_band, uint256 _missing_decimals, uint256 _init_tcr, uint256 _init_ecr) external override onlyAssetController {
+    function addCollateralPolicy(uint256 _aid, uint256 _price_band, uint256 _missing_decimals, uint256 _init_tcr, uint256 _init_ecr) external override onlyAssetControllerOrOperator {
         CollateralPolicy storage _collateralPolicy = assetCollateralPolicy[_aid];
         _collateralPolicy.target_collateral_ratio = _init_tcr;
         _collateralPolicy.effective_collateral_ratio = _init_ecr;
         _collateralPolicy.price_band = _price_band;
         _collateralPolicy.missing_decimals = _missing_decimals;
+        _collateralPolicy.price_target = 1e18 - _missing_decimals;
     }
 
     // Add new Pool
@@ -476,18 +476,18 @@ contract MultiAssetTreasury is IMultiAssetTreasury, Operator, ReentrancyGuard {
         using_effective_collateral_ratio = !using_effective_collateral_ratio;
     }
 
-    function setRouter(address _router) public onlyOwner {
+    function setRouter(address _router) public onlyOperator {
         require(_router != address(0), "invalidAddress");
         router = _router;
     }
 
-    function setDaoFund(address _daoFund) public onlyOwner {
+    function setDaoFund(address _daoFund) public onlyOperator {
         require(_daoFund != address(0), "invalidAddress");
         daoFund = _daoFund;
         emit ChangeDaoFund(_daoFund);
     }
 
-    function setMissingDecimals(uint256 _missing_decimals, uint256 _assetId) external override onlyAssetController {
+    function setMissingDecimals(uint256 _missing_decimals, uint256 _assetId) external override onlyAssetControllerOrOperator {
         CollateralPolicy storage _collateralPolicy = assetCollateralPolicy[_assetId];
         _collateralPolicy.missing_decimals = _missing_decimals;
     }

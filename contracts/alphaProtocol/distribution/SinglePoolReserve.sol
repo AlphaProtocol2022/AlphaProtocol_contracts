@@ -13,7 +13,9 @@ contract SinglePoolReserve is Operator, ICurrencyReserve {
 
     address public xShareSinglePool;
     address public xShare;
-    uint256 public TOTAL_REWARD = 7000000 ether;
+    uint256 public TOTAL_REWARD = 5000000 ether;
+
+    bool migrated = false;
 
     constructor(address _xShare, address _xShareSinglePool) public {
         xShare = _xShare;

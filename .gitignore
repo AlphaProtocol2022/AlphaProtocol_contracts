@@ -1,6 +1,12 @@
 node_modules
-scripts/.env
+.env
 coverage
 coverage.json
 typechain
 
+scripts
+hardhat.config.js
+package-lock.json
+package.json
+artifacts
+cache

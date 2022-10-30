@@ -1,6 +1,6 @@
 pragma solidity >=0.6.12;
 
-import "../Operator.sol";
+import "../../Operator.sol";
 
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -27,27 +27,26 @@ contract PreSale is Operator, ReentrancyGuard {
     // Presale timestamp config
     uint256 public startTime; // Presale start timestamp
     uint256 public endTime; // Presale end timestamp
-    uint256 public duration = 60 * 60 * 24 * 2; // Presale duration: 2 Days
+    uint256 public duration = 60*60*24*2; // Presale duration: 2 Days
 
     // Post-presale timestamp config
     uint256 public claimTime; // Non-Bonus token claim time: after public sale done
     uint256 public claimBonusTime; // Bonus token claim time: 2 week claim time
     uint256 public endClaimBonusTime; // End of Bonus token claim time: after this, all unClaimed bonus token will be returned to treausry
 
-
     // User distribution rules
     uint256 public constant MIN_DISTRIBUTION = 10 ** 6; // Min buy 1 usdc
     uint256 public constant MAX_DISTRIBUTION = 5000 * (10 ** 6); // Max buy 5,000 usdc
 
     // Bonus Info
-    uint256 public constant MIN_BONUS = 10e4; // 10% Bonus if contribute 50 - 999 USDC
-    uint256 public constant MEDIUM_BONUS = 15e4; // 15% Bonus if contribute 1000 - 2499 USDC
-    uint256 public constant MAX_BONUS = 25e4; // 25% Bonus if contribute 2500 - 5000 USDC
+    uint256 public constant MIN_BONUS = 10e4; // 10% XSHARE Bonus if contribute 500 - 999 USDC
+    uint256 public constant MEDIUM_BONUS = 15e4; // 15% XSHARE Bonus if contribute 1000 - 2499 USDC
+    uint256 public constant MAX_BONUS = 25e4; // 25% XSHARE Bonus if contribute 2500 - 5000 USDC
     uint256 public constant RATIO_PRECISION = 1e6;
-    uint256 public constant totalBonusClaimed;
+    uint256 public totalBonusClaimed;
 
     // XShare Amount Info
-    uint256 public constant HARD_CAP = 5000 * (10 ** 6); // Hard cap = 50,000 USDC
+    uint256 public constant HARD_CAP = 50000 * (10 ** 6); // Hard cap = 50,000 USDC
     uint256 public constant XSHARE_SELL_AMOUNT = 500000 ether;
     uint256 public constant MAX_XSHARE_BONUS_AMOUNT = 125000 ether; // 25% of 500,000 xShare
     uint256 public totalClaimed;
@@ -162,7 +161,7 @@ contract PreSale is Operator, ReentrancyGuard {
         uint256 committed_amount = userCommittedAmount[msg.sender];
 
         //Validation
-        require(committed_amount > 0, "User not entered the presale");
+        require(committed_amount > 500 * (10**6), "Not required for bonus");
         require(!bonusClaimed[msg.sender], "User already claimed bonus");
 
         //Calculate bonus amount.
@@ -184,7 +183,7 @@ contract PreSale is Operator, ReentrancyGuard {
         uint256 unclaimed_bonus_xShare = MAX_XSHARE_BONUS_AMOUNT.sub(totalBonusClaimed);
         returnedUnClaimedBonus = true;
 
-        ERC(xShare).safeTransfer(_daoFund, unclaimed_bonus_xShare);
+        ERC20(xShare).safeTransfer(_daoFund, unclaimed_bonus_xShare);
         emit ReturnUnclaimedBonusXShare(_daoFund, unclaimed_bonus_xShare);
     }
 
@@ -198,7 +197,7 @@ contract PreSale is Operator, ReentrancyGuard {
             _xShare_bonus = xShareBoughtAmount.mul(MAX_BONUS).div(RATIO_PRECISION);
         } else if (committed_amount_18dec >= 1000 ether) {
             _xShare_bonus = xShareBoughtAmount.mul(MEDIUM_BONUS).div(RATIO_PRECISION);
-        } else {
+        } else if (committed_amount_18dec >= 500 ether) {
             _xShare_bonus = xShareBoughtAmount.mul(MIN_BONUS).div(RATIO_PRECISION);
         }
     }

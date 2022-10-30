@@ -27,12 +27,10 @@ contract InvestmentController is IInvestmentController, Operator {
 
     Strategy[] strategies;
 
-    //TODO function add strategy => done
-
     //Collateral reserve threshold
     mapping(uint256 => uint256) assetCrt; // asset collateral reserve threshold (crt = collateralReserve / target collateral)
     uint256 public MINIMUM_CRT = 250000; // Minimum crt is 25%, if crt < 25%, collateral will be sent from strategy to collateral fund
-    uint256 public RATIO_PRECISION = 1e6; // TODO fixed to 1e6 => done/not deployed => done
+    uint256 public RATIO_PRECISION = 1e6;
     uint256 private constant PRICE_PRECISION = 1e6;
 
     // Profits distribution ratio

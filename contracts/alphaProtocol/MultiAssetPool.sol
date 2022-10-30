@@ -13,8 +13,9 @@ import "./../interfaces/IOracle.sol";
 import "./../interfaces/IAsset.sol";
 import "./../interfaces/IAssetController.sol";
 import "./../interfaces/IMultiAssetPool.sol";
+import "../Operator.sol";
 
-contract MultiAssetPool is ReentrancyGuard, IMultiAssetPool {
+contract MultiAssetPool is Operator, ReentrancyGuard, IMultiAssetPool {
     using SafeMath for uint256;
     using SafeERC20 for ERC20;
 
@@ -51,17 +52,10 @@ contract MultiAssetPool is ReentrancyGuard, IMultiAssetPool {
     // Number of blocks to wait before being able to collectRedemption()
     uint256 public redemption_delay = 1;
 
-    address public operator;
-
     /* ========== MODIFIERS ========== */
 
-    modifier onlyAssetController() {
-        require(msg.sender == assetController, "!assetController");
-        _;
-    }
-
-    modifier onlyOperator() {
-        require(operator == msg.sender, "Pool: caller is not the operator");
+    modifier onlyAssetControllerOrOperator() {
+        require(msg.sender == assetController || msg.sender == operator(), "!assetController");
         _;
     }
 
@@ -85,7 +79,6 @@ contract MultiAssetPool is ReentrancyGuard, IMultiAssetPool {
         require(_xShare != address(0), "Invalid address");
         require(_treasury != address(0), "Invalid address");
         require(_assetController != address(0), "Invalid address");
-        operator = msg.sender;
         feeCollector = msg.sender;
         xShare = _xShare;
         treasury = _treasury;
@@ -170,8 +163,7 @@ contract MultiAssetPool is ReentrancyGuard, IMultiAssetPool {
     /* ========== PUBLIC FUNCTIONS ========== */
 
     // Calculate Minting output variables
-    function calcMint(
-        uint256 _collateralAmount,
+    function calcMint(uint256 _collateralAmount,
         uint256 _share_amount,
         uint256 _assetId,
         uint256 _missing_decimals
@@ -201,7 +193,7 @@ contract MultiAssetPool is ReentrancyGuard, IMultiAssetPool {
         uint256 _share_amount,
         uint256 _alpha_out_min,
         uint256 _assetId
-    ) external {
+    ) external nonReentrant {
         require(assetStat[_assetId].mint_paused == false, "Minting is paused");
         require(_assetId <= IAssetController(assetController).assetCount(), "Not Exsited Asset");
 
@@ -243,12 +235,18 @@ contract MultiAssetPool is ReentrancyGuard, IMultiAssetPool {
         uint256 _fee = _asset_amount.mul(_redemption_fee).div(PRICE_PRECISION).div(10 ** _missing_decimals);
         _fee_collect = _fee.mul(_ecr).div(PRICE_PRECISION);
         uint256 _asset_amount_post_fee = _asset_amount.sub(_fee.mul(10 ** _missing_decimals));
-        _collateral_output_amount = _asset_amount_post_fee.mul(_ecr).div(10 ** _missing_decimals).div(PRICE_PRECISION);
+        _collateral_output_amount = 0;
+        _share_output_amount = 0;
+        if (_ecr < COLLATERAL_RATIO_MAX && _ecr >= 0) {
+            _collateral_output_amount = _asset_amount_post_fee.mul(_ecr).div(10 ** _missing_decimals).div(PRICE_PRECISION);
 
-        uint256 _collateral_output_value = _collateral_output_amount.mul(10 ** _missing_decimals);
-        uint256 _collateral_price = IAssetController(assetController).getCollateralPriceInDollar(_assetId);
-        uint256 _share_output_value = (_asset_amount_post_fee.sub(_collateral_output_value)).mul(_collateral_price).div(PRICE_PRECISION);
-        _share_output_amount = _share_output_value.mul(PRICE_PRECISION).div(_share_price);
+            uint256 _collateral_output_value = _collateral_output_amount.mul(10 ** _missing_decimals);
+            uint256 _collateral_price = IAssetController(assetController).getCollateralPriceInDollar(_assetId);
+            uint256 _share_output_value = (_asset_amount_post_fee.sub(_collateral_output_value)).mul(_collateral_price).div(PRICE_PRECISION);
+            _share_output_amount = _share_output_value.mul(PRICE_PRECISION).div(_share_price);
+        } else if (_ecr == COLLATERAL_RATIO_MAX) {
+            _collateral_output_amount = _asset_amount_post_fee;
+        }
     }
 
     function redeem(
@@ -256,7 +254,7 @@ contract MultiAssetPool is ReentrancyGuard, IMultiAssetPool {
         uint256 _share_out_min,
         uint256 _collateral_out_min,
         uint256 _assetId
-    ) external {
+    ) external nonReentrant {
         require(assetStat[_assetId].redeem_paused == false, "Redeeming is paused");
         AssetStat storage _assetStat = assetStat[_assetId];
         (uint256 _collateral_output_amount, uint256 _share_output_amount, uint256 _fee_collect) = calcRedeem(_asset_amount, _assetId, _assetStat.missing_decimals);
@@ -293,7 +291,7 @@ contract MultiAssetPool is ReentrancyGuard, IMultiAssetPool {
     }
 
     // Collect all pending collateral and xShare of msg.sender
-    function collectRedemption() external {
+    function collectRedemption() external nonReentrant {
         // Redeem and Collect cannot happen in the same transaction to avoid flash loan attack
         require((last_redeemed[msg.sender].add(redemption_delay)) <= block.number, "<redemption_delay");
         uint256 _asset_count = IAssetController(assetController).assetCount();
@@ -376,7 +374,7 @@ contract MultiAssetPool is ReentrancyGuard, IMultiAssetPool {
 
     /* ========== RESTRICTED FUNCTIONS ========== */
 
-    function addAssetStat(uint256 _aid, uint256 _missingDecimals) external override onlyAssetController {
+    function addAssetStat(uint256 _aid, uint256 _missingDecimals) external override onlyAssetControllerOrOperator {
         AssetStat storage _assetStat = assetStat[_aid];
         _assetStat.missing_decimals = _missingDecimals;
         _assetStat.pool_ceiling = 999999999999999999999 ether;

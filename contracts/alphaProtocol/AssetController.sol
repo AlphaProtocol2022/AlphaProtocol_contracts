@@ -39,7 +39,6 @@ contract AssetController is Operator, IAssetController {
         address _treasury,
         address _pool,
         address _xShare,
-        address _xShareOracle,
         address _router,
         address _usdc
     ) public onlyOperator {
@@ -47,17 +46,20 @@ contract AssetController is Operator, IAssetController {
         require(_treasury != address(0), "Invalid Address");
         require(_pool != address(0), "Invalid Address");
         require(_xShare != address(0), "Invalid Address");
-        require(_xShareOracle != address(0), "Invalid Address");
         require(_router != address(0), "Invalid Address");
 
         treasury = _treasury;
         pool = _pool;
         xShare = _xShare;
-        xShareOracle = _xShareOracle;
         router = _router;
         usdc = _usdc;
 
         initialized = true;
+    }
+
+    modifier onlyTreasury() {
+        require(msg.sender == treasury, "!Treasury");
+        _;
     }
 
     function checkAssetExisted(address _asset, address _collateral) internal view {
@@ -150,7 +152,7 @@ contract AssetController is Operator, IAssetController {
 
     /* ========== GOVERNANCE FUNCTIONS ========== */
 
-    function setTreasury(address _treasury) public onlyOperator {
+    function setTreasury(address _treasury) public onlyTreasury {
         require(_treasury != address(0), "Invalid address");
         treasury = _treasury;
     }
@@ -204,6 +206,32 @@ contract AssetController is Operator, IAssetController {
         usdc = _usdc;
     }
 
+    function setRouter(address _router) public onlyOperator {
+        require(_router != address(0), "Invalid address");
+        router = _router;
+    }
+
+    function executeTransaction(
+        address target,
+        uint256 value,
+        string memory signature,
+        bytes memory data
+    ) public onlyOperator returns (bytes memory) {
+        bytes memory callData;
+
+        if (bytes(signature).length == 0) {
+            callData = data;
+        } else {
+            callData = abi.encodePacked(bytes4(keccak256(bytes(signature))), data);
+        }
+        // solium-disable-next-line security/no-call-value
+        (bool success, bytes memory returnData) = target.call{value : value}(callData);
+        require(success, string("DaoFund::executeTransaction: Transaction execution reverted."));
+        emit TransactionExecuted(target, value, signature, data);
+        return returnData;
+    }
+
+    event TransactionExecuted(address indexed target, uint256 value, string signature, bytes data);
     event AddNewAsset(address indexed asset, address indexed collateral);
 
 }

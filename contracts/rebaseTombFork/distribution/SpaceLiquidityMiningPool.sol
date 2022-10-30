@@ -9,7 +9,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 import "../../Operator.sol";
 
-contract XShareLiquidityMiningPool is Operator, ReentrancyGuard {
+contract SpaceLiquidityMiningPool is Operator, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
@@ -24,14 +24,14 @@ contract XShareLiquidityMiningPool is Operator, ReentrancyGuard {
     // Info of each pool.
     struct PoolInfo {
         IERC20 token; // Address of LP token contract.
-        uint256 allocPoint; // How many allocation points assigned to this pool. xShares to distribute per block.
-        uint256 lastRewardTime; // Last time that xShare distribution occurs.
-        uint256 accXSharePerShare; // Accumulated xShare per share, times 1e18. See below.
+        uint256 allocPoint; // How many allocation points assigned to this pool. space to distribute per block.
+        uint256 lastRewardTime; // Last time that space distribution occurs.
+        uint256 accSpacePerShare; // Accumulated space per share, times 1e18. See below.
         bool isStarted; // if lastRewardTime has passed
         uint256 taxRate; // Pool's deposit fee
     }
 
-    IERC20 public xshare;
+    IERC20 public space;
 
     // Info of each pool.
     PoolInfo[] public poolInfo;
@@ -42,19 +42,19 @@ contract XShareLiquidityMiningPool is Operator, ReentrancyGuard {
     // Total allocation points. Must be the sum of all allocation points in all pools.
     uint256 public totalAllocPoint = 0;
 
-    // The time when xShare mining starts.
+    // The time when space mining starts.
     uint256 public poolStartTime;
 
-    // The time when xShare mining ends.
+    // The time when space mining ends.
     uint256 public poolEndTime;
 
     address public daoFund; //All Deposit Fee (if there is) will be sent to DaoFund
     uint256 public constant MIN_TAX_RATE = 0;
     uint256 public constant MAX_TAX_RATE = 400; // Max = 400/10000*100 = 4%
 
-    uint256 public xSharePerSecond;
-    uint256 public runningTime = 365 days; // 1 years
-    uint256 public constant TOTAL_REWARDS = 70000000 ether; // 70.000.000 xShare
+    uint256 public tokenPerSecond;
+    uint256 public runningTime = 365 days; // 1 year
+    uint256 public constant TOTAL_REWARDS = 56000 ether;
 
     bool public migrated = false;
 
@@ -65,23 +65,23 @@ contract XShareLiquidityMiningPool is Operator, ReentrancyGuard {
     event MigrateRewardPool(address indexed newRewardPool);
 
     constructor(
-        address _xshare,
+        address _space,
         uint256 _poolStartTime,
         address _daoFund
     ) public {
         require(block.timestamp < _poolStartTime, "late");
-        require(_xshare != address(0), "!xShare" );
-        xshare = IERC20(_xshare);
+        require(_space != address(0), "!space" );
+        space = IERC20(_space);
         poolStartTime = _poolStartTime;
         poolEndTime = poolStartTime + runningTime;
-        xSharePerSecond = TOTAL_REWARDS.div(runningTime);
+        tokenPerSecond = TOTAL_REWARDS.div(runningTime);
         daoFund = _daoFund;
     }
 
     function checkPoolDuplicate(IERC20 _token) internal view {
         uint256 length = poolInfo.length;
         for (uint256 pid = 0; pid < length; ++pid) {
-            require(poolInfo[pid].token != _token, "xShareRewardPool: existing pool?");
+            require(poolInfo[pid].token != _token, "spaceRewardPool: existing pool?");
         }
     }
 
@@ -120,7 +120,7 @@ contract XShareLiquidityMiningPool is Operator, ReentrancyGuard {
         token : _token,
         allocPoint : _allocPoint,
         lastRewardTime : _lastRewardTime,
-        accXSharePerShare : 0,
+        accSpacePerShare : 0,
         isStarted : _isStarted,
         taxRate : _taxRate
         }));
@@ -129,7 +129,7 @@ contract XShareLiquidityMiningPool is Operator, ReentrancyGuard {
         }
     }
 
-    // Update the given pool's xSHARE allocation point. Can only be called by the owner.
+    // Update the given pool's space allocation point. Can only be called by the owner.
     function set(uint256 _pid, uint256 _allocPoint) public onlyOperator {
         massUpdatePools();
         PoolInfo storage pool = poolInfo[_pid];
@@ -146,27 +146,27 @@ contract XShareLiquidityMiningPool is Operator, ReentrancyGuard {
         if (_fromTime >= _toTime) return 0;
         if (_toTime >= poolEndTime) {
             if (_fromTime >= poolEndTime) return 0;
-            if (_fromTime <= poolStartTime) return poolEndTime.sub(poolStartTime).mul(xSharePerSecond);
-            return poolEndTime.sub(_fromTime).mul(xSharePerSecond);
+            if (_fromTime <= poolStartTime) return poolEndTime.sub(poolStartTime).mul(tokenPerSecond);
+            return poolEndTime.sub(_fromTime).mul(tokenPerSecond);
         } else {
             if (_toTime <= poolStartTime) return 0;
-            if (_fromTime <= poolStartTime) return _toTime.sub(poolStartTime).mul(xSharePerSecond);
-            return _toTime.sub(_fromTime).mul(xSharePerSecond);
+            if (_fromTime <= poolStartTime) return _toTime.sub(poolStartTime).mul(tokenPerSecond);
+            return _toTime.sub(_fromTime).mul(tokenPerSecond);
         }
     }
 
-    // View function to see pending xShares on frontend.
+    // View function to see pending space on frontend.
     function pendingShare(uint256 _pid, address _user) external view returns (uint256) {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_user];
-        uint256 accXSharePerShare = pool.accXSharePerShare;
+        uint256 accSpacePerShare = pool.accSpacePerShare;
         uint256 tokenSupply = pool.token.balanceOf(address(this));
         if (block.timestamp > pool.lastRewardTime && tokenSupply != 0) {
             uint256 _generatedReward = getGeneratedReward(pool.lastRewardTime, block.timestamp);
-            uint256 _xshareReward = _generatedReward.mul(pool.allocPoint).div(totalAllocPoint);
-            accXSharePerShare = accXSharePerShare.add(_xshareReward.mul(1e18).div(tokenSupply));
+            uint256 _spaceReward = _generatedReward.mul(pool.allocPoint).div(totalAllocPoint);
+            accSpacePerShare = accSpacePerShare.add(_spaceReward.mul(1e18).div(tokenSupply));
         }
-        return user.amount.mul(accXSharePerShare).div(1e18).sub(user.rewardDebt);
+        return user.amount.mul(accSpacePerShare).div(1e18).sub(user.rewardDebt);
     }
 
     // Update reward variables for all pools. Be careful of gas spending!
@@ -194,8 +194,8 @@ contract XShareLiquidityMiningPool is Operator, ReentrancyGuard {
         }
         if (totalAllocPoint > 0) {
             uint256 _generatedReward = getGeneratedReward(pool.lastRewardTime, block.timestamp);
-            uint256 _xshareReward = _generatedReward.mul(pool.allocPoint).div(totalAllocPoint);
-            pool.accXSharePerShare = pool.accXSharePerShare.add(_xshareReward.mul(1e18).div(tokenSupply));
+            uint256 _spaceReward = _generatedReward.mul(pool.allocPoint).div(totalAllocPoint);
+            pool.accSpacePerShare = pool.accSpacePerShare.add(_spaceReward.mul(1e18).div(tokenSupply));
         }
         pool.lastRewardTime = block.timestamp;
     }
@@ -207,9 +207,9 @@ contract XShareLiquidityMiningPool is Operator, ReentrancyGuard {
         UserInfo storage user = userInfo[_pid][_sender];
         updatePool(_pid);
         if (user.amount > 0) {
-            uint256 _pending = user.amount.mul(pool.accXSharePerShare).div(1e18).sub(user.rewardDebt);
+            uint256 _pending = user.amount.mul(pool.accSpacePerShare).div(1e18).sub(user.rewardDebt);
             if (_pending > 0) {
-                safeXShareTransfer(_sender, _pending);
+                safeSpaceTransfer(_sender, _pending);
                 emit RewardPaid(_sender, _pending);
             }
         }
@@ -230,7 +230,7 @@ contract XShareLiquidityMiningPool is Operator, ReentrancyGuard {
             pool.token.safeTransferFrom(_sender, daoFund, _taxAmount);
             user.amount = user.amount.add(_amount_post_fee);
         }
-        user.rewardDebt = user.amount.mul(pool.accXSharePerShare).div(1e18);
+        user.rewardDebt = user.amount.mul(pool.accSpacePerShare).div(1e18);
         emit Deposit(_sender, _pid, _amount);
     }
 
@@ -241,9 +241,9 @@ contract XShareLiquidityMiningPool is Operator, ReentrancyGuard {
         UserInfo storage user = userInfo[_pid][_sender];
         require(user.amount >= _amount, "withdraw: not good");
         updatePool(_pid);
-        uint256 _pending = user.amount.mul(pool.accXSharePerShare).div(1e18).sub(user.rewardDebt);
+        uint256 _pending = user.amount.mul(pool.accSpacePerShare).div(1e18).sub(user.rewardDebt);
         if (_pending > 0) {
-            safeXShareTransfer(_sender, _pending);
+            safeSpaceTransfer(_sender, _pending);
             emit RewardPaid(_sender, _pending);
         }
         if (_amount > 0) {
@@ -254,7 +254,7 @@ contract XShareLiquidityMiningPool is Operator, ReentrancyGuard {
                 user.withdrawTimestamp = block.timestamp;
             }
         }
-        user.rewardDebt = user.amount.mul(pool.accXSharePerShare).div(1e18);
+        user.rewardDebt = user.amount.mul(pool.accSpacePerShare).div(1e18);
         emit Withdraw(_sender, _pid, _amount);
     }
 
@@ -275,27 +275,27 @@ contract XShareLiquidityMiningPool is Operator, ReentrancyGuard {
         require(_newRewardPool != address(0), "Invalid address");
 
         migrated = true;
-        xSharePerSecond = 0;
-        safeXShareTransfer(_newRewardPool, TOTAL_REWARDS);
+        tokenPerSecond = 0;
+        safeSpaceTransfer(_newRewardPool, TOTAL_REWARDS);
 
         emit MigrateRewardPool(_newRewardPool);
     }
 
-    // Safe xShare transfer function, just in case if rounding error causes pool to not have enough xShares.
-    function safeXShareTransfer(address _to, uint256 _amount) internal {
-        uint256 _xshareBal = xshare.balanceOf(address(this));
-        if (_xshareBal > 0) {
-            if (_amount > _xshareBal) {
-                xshare.safeTransfer(_to, _xshareBal);
+    // Safe space transfer function, just in case if rounding error causes pool to not have enough space.
+    function safeSpaceTransfer(address _to, uint256 _amount) internal {
+        uint256 _spaceBal = space.balanceOf(address(this));
+        if (_spaceBal > 0) {
+            if (_amount > _spaceBal) {
+                space.safeTransfer(_to, _spaceBal);
             } else {
-                xshare.safeTransfer(_to, _amount);
+                space.safeTransfer(_to, _amount);
             }
         }
     }
 
-    function updateXSharePerSec(uint256 _new_xSharePerSec) public onlyOperator {
-        require(_new_xSharePerSec >= 0, "Invalid amount");
-        xSharePerSecond = _new_xSharePerSec;
+    function updateSpacePerSec(uint256 _new_spacePerSec) public onlyOperator {
+        require(_new_spacePerSec >= 0, "Invalid amount");
+        tokenPerSecond = _new_spacePerSec;
     }
 
     function setPoolTaxRate(uint256 _pid, uint256 _new_tax_rate) public onlyOperator {
@@ -306,8 +306,8 @@ contract XShareLiquidityMiningPool is Operator, ReentrancyGuard {
 
     function governanceRecoverUnsupported(IERC20 _token, uint256 amount, address to) external onlyOperator {
         if (block.timestamp < poolEndTime + 90 days) {
-            // do not allow to drain core token (xShare or lps) if less than 90 days after pool ends
-            require(_token != xshare, "xShare");
+            // do not allow to drain core token (space or lps) if less than 90 days after pool ends
+            require(_token != space, "space");
             uint256 length = poolInfo.length;
             for (uint256 pid = 0; pid < length; ++pid) {
                 PoolInfo storage pool = poolInfo[pid];

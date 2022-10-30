@@ -5,10 +5,12 @@ pragma solidity >=0.6.12;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+
 import "./../../interfaces/ICurrencyReserve.sol";
 import "../../Operator.sol";
 
-contract XShareSinglePool is Operator {
+contract XShareSinglePool is Operator, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
@@ -48,13 +50,16 @@ contract XShareSinglePool is Operator {
     uint256 public poolEndTime;
 
     uint256 public xSharePerSecond;
-    uint256 public runningTime = 365 days; // 3 years
-    uint256 public constant TOTAL_REWARDS = 5000000 ether; // 7.000.000 xSHare
+    uint256 public runningTime = 365 days; // 1 years
+    uint256 public constant TOTAL_REWARDS = 5000000 ether; // 5.000.000 xSHare
+
+    bool public migrated = false;
 
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event EmergencyWithdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event RewardPaid(address indexed user, uint256 amount);
+    event MigrateRewardPool(address indexed newRewardPool);
 
     constructor(
         address _xshare,
@@ -188,11 +193,12 @@ contract XShareSinglePool is Operator {
     }
 
     // Deposit LP tokens.
-    function deposit(uint256 _pid, uint256 _amount) public {
+    function deposit(uint256 _pid, uint256 _amount) public nonReentrant {
         address _sender = msg.sender;
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_sender];
         updatePool(_pid);
+
         if (user.amount > 0) {
             uint256 _pending = user.amount.mul(pool.accXSharePerShare).div(1e18).sub(user.rewardDebt);
             if (_pending > 0) {
@@ -200,16 +206,18 @@ contract XShareSinglePool is Operator {
                 emit RewardPaid(_sender, _pending);
             }
         }
+
         if (_amount > 0) {
             pool.token.safeTransferFrom(_sender, address(this), _amount);
             user.amount = user.amount.add(_amount);
         }
+
         user.rewardDebt = user.amount.mul(pool.accXSharePerShare).div(1e18);
         emit Deposit(_sender, _pid, _amount);
     }
 
     // Withdraw LP tokens.
-    function withdraw(uint256 _pid, uint256 _amount) public {
+    function withdraw(uint256 _pid, uint256 _amount) public nonReentrant {
         address _sender = msg.sender;
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_sender];
@@ -229,7 +237,7 @@ contract XShareSinglePool is Operator {
     }
 
     // Withdraw without caring about rewards. EMERGENCY ONLY.
-    function emergencyWithdraw(uint256 _pid) public {
+    function emergencyWithdraw(uint256 _pid) public nonReentrant {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
         uint256 _amount = user.amount;
@@ -251,12 +259,26 @@ contract XShareSinglePool is Operator {
         }
     }
 
+    // Migrating to new pool. In case poolV2 developed
+    function migrate(address _newRewardPool) public onlyOperator {
+        require(!migrated, "Already migrated");
+        require(_newRewardPool != address(0), "Invalid address");
+
+        migrated = true;
+        xSharePerSecond = 0;
+        uint256 remainReward = xShare.balanceOf(rewardReserve);
+        safeXShareTransfer(_newRewardPool, remainReward);
+
+        emit MigrateRewardPool(_newRewardPool);
+    }
+
     function updateXSharePerSecond(uint256 _new_emission) external onlyOperator {
         require(_new_emission >= 0, "Invalid amount");
         xSharePerSecond = _new_emission;
     }
 
     function setRewardReserve(address _rewardReserve) external onlyOperator {
+        require(_rewardReserve!= address(0), "Invald address");
         rewardReserve = _rewardReserve;
     }
 

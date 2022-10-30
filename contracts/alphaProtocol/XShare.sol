@@ -25,7 +25,7 @@ contract XShare is ERC20Burnable, Operator {
 
     address[] public excludeTotalSupply;
 
-    uint256 public constant VESTING_DURATION = 730 days;
+    uint256 public constant VESTING_DURATION = 365 days;
     uint256 public startTime;
     uint256 public endTime;
 
@@ -34,8 +34,6 @@ contract XShare is ERC20Burnable, Operator {
 
     address public daoFund;
     address public devFund;
-
-    address public xShareRewardPool;
 
     uint256 public lastClaimedTime;
 
@@ -82,7 +80,6 @@ contract XShare is ERC20Burnable, Operator {
         require(!rewardPoolDistributed, "only can distribute once");
         require(_farmingIncentiveFund != address(0), "!_farmingIncentiveFund");
         require(_poolReserve != address(0), "!_poolContract");
-        require(_advisorVestingContract != address(0), "!_advisorVestingContract");
         rewardPoolDistributed = true;
         _mint(_farmingIncentiveFund, LIQUIDITY_MINING_ALLOCATION);
         _mint(_poolReserve, POOL_ALLOCATION);
@@ -105,16 +102,6 @@ contract XShare is ERC20Burnable, Operator {
             cirSupply = cirSupply.sub(balanceOf(excludeTotalSupply[i]));
         }
         return cirSupply;
-    }
-
-    function setDaoFund(address _daoFund) external onlyOperator {
-        require(_daoFund != address(0), "zero");
-        daoFund = _daoFund;
-    }
-
-    function setDevFund(address _devFund) external onlyOperator {
-        require(_devFund != address(0), "zero");
-        devFund = _devFund;
     }
 
     function unclaimedDaoFund() public view returns (uint256 _pending) {
@@ -168,6 +155,16 @@ contract XShare is ERC20Burnable, Operator {
     function addExcludeTotalSupply(address _rewardPool) public onlyOperator {
         require(_rewardPool != address(0), "Invalid address");
         excludeTotalSupply.push(_rewardPool);
+    }
+
+    function setDaoFund(address _daoFund) external onlyOperator {
+        require(_daoFund != address(0), "zero");
+        daoFund = _daoFund;
+    }
+
+    function setDevFund(address _devFund) external onlyOperator {
+        require(_devFund != address(0), "zero");
+        devFund = _devFund;
     }
 
     function governanceRecoverUnsupported(

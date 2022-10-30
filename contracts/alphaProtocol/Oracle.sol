@@ -92,5 +92,9 @@ contract Oracle is Epoch {
         }
     }
 
+    function sync() external {
+        pair.sync();
+    }
+
     event Updated(uint256 price0CumulativeLast, uint256 price1CumulativeLast);
 }

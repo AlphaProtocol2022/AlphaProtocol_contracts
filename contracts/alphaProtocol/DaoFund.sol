@@ -12,22 +12,15 @@ contract DaoFund is ICurrencyReserve, Operator {
     using SafeERC20 for IERC20;
 
     address public treasury;
-    address public custodian;
 
     /* ========== MODIFIER ========== */
-    modifier onlyTreasuryOrCustodian() {
-        require(treasury == msg.sender || custodian == msg.sender, "Only treasury or custodian can trigger this function");
+    modifier onlyTreasuryOrOperator() {
+        require(treasury == msg.sender || operator() == msg.sender, "Only treasury or custodian can trigger this function");
         _;
     }
 
-    modifier onlyCustodian() {
-        require(custodian == msg.sender, "!custodian");
-        _;
-    }
-
-    constructor (address _treasury, address _custodian) public {
+    constructor (address _treasury) public {
         treasury = _treasury;
-        custodian = _custodian;
     }
 
     /* ========== VIEWS ================ */
@@ -42,15 +35,10 @@ contract DaoFund is ICurrencyReserve, Operator {
         address _token,
         address _receiver,
         uint256 _amount
-    ) public override onlyTreasuryOrCustodian {
+    ) public override onlyTreasuryOrOperator {
         require(_receiver != address(0), "Invalid address");
         require(_amount > 0, "Cannot transfer zero amount");
         IERC20(_token).safeTransfer(_receiver, _amount);
-    }
-
-    function setCustodian(address _custodian) public onlyCustodian {
-        require(_custodian != address(0), "Invalid address");
-        custodian = _custodian;
     }
 
     function executeTransaction(
@@ -58,7 +46,7 @@ contract DaoFund is ICurrencyReserve, Operator {
         uint256 value,
         string memory signature,
         bytes memory data
-    ) public onlyOperator returns (bytes memory) {
+    ) public onlyTreasuryOrOperator returns (bytes memory) {
         bytes memory callData;
 
         if (bytes(signature).length == 0) {
