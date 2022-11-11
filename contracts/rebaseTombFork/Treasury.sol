@@ -32,6 +32,8 @@ contract Treasury is ContractGuard {
     uint256 public epoch;
     uint256 public previousEpoch;
     uint256 public epochSupplyContractionLeft;
+    uint256 public bootstrapEpochs = 28;
+    uint256 public bootstrapSupplyExpansionPercent = 450;
 
     address public mainToken;
     address public shareToken;
@@ -50,25 +52,27 @@ contract Treasury is ContractGuard {
     /*===== Rebase ====*/
     uint256 public numberOfEpochBelowOneCondition = 6;
     uint256 private constant DECIMALS = 18;
-    uint256 private constant ONE = uint256(10**DECIMALS);
+    uint256 private constant ONE = uint256(10 ** DECIMALS);
     // Due to the expression in computeSupplyDelta(), MAX_RATE * MAX_SUPPLY must fit into an int256.
     // Both are 18 decimals fixed point numbers.
-    uint256 private constant MAX_RATE = 10**18 * 10**DECIMALS;
+    uint256 private constant MAX_RATE = 10 ** 6 * 10 ** DECIMALS;
     // MAX_SUPPLY = MAX_INT256 / MAX_RATE
     uint256 private constant MAX_SUPPLY = uint256(type(int256).max) / MAX_RATE;
 
     bool public rebaseStarted;
 
-    uint256 private constant midpointRounding = 10**(DECIMALS - 7);
+    uint256 private constant midpointRounding = 10 ** (DECIMALS - 4);
 
     uint256 public previousEpochMainPrice;
 
-    uint256 public constant minMainSupplyToExpansion = 500000 ether;
+    uint256 public constant minMainSupplyToExpansion = 10000 ether;
 
     /*===== End Rebase ====*/
 
     uint256 public constant daoFundSharedPercent = 20; // 20%
+    address public daoFund;
     uint256 public constant devFundSharedPercent = 5; // 5%
+    address public devFund;
 
     uint256 private constant minPercentExpansionTier = 10; // 0.1%
     uint256 private constant maxPercentExpansionTier = 1000; // 10%
@@ -118,7 +122,7 @@ contract Treasury is ContractGuard {
     }
 
     modifier checkCondition() {
-        require(block.timestamp >= staronlyOperatortTime, "Treasury: not started yet");
+        require(block.timestamp >= startTime, "Treasury: not started yet");
 
         _;
     }
@@ -134,7 +138,7 @@ contract Treasury is ContractGuard {
     modifier checkOperator() {
         require(
             IBasisAsset(mainToken).operator() == address(this) &&
-            IBasisAsset(shareToken).operator() == address(this) &&
+            //            IBasisAsset(shareToken).operator() == address(this) &&
             Operator(boardroom).operator() == address(this),
             "Treasury: need more permission"
         );
@@ -183,27 +187,34 @@ contract Treasury is ContractGuard {
         address _shareToken,
         address _oracle,
         address _boardroom,
+        address _daoFund,
+        address _devFund,
         uint256 _startTime
     ) external notInitialized {
         require(_mainToken != address(0), "!_mainToken");
         require(_shareToken != address(0), "!_shareToken");
         require(_oracle != address(0), "!_oracle");
         require(_boardroom != address(0), "!_boardroom");
+        require(_daoFund != address(0), "!_boardroom");
+        require(_devFund != address(0), "!_boardroom");
 
         mainToken = _mainToken;
         shareToken = _shareToken;
         oracle = _oracle;
         boardroom = _boardroom;
-
+        daoFund = _daoFund;
+        devFund = _devFund;
         startTime = _startTime;
 
-        mainTokenPriceOne = 10**18; // This is to allow a PEG of 1 MainToken per XSHARE
-        mainTokenPriceRebase = 85*10**16; // 0.85 XSHARE
+        mainTokenPriceOne = 10 ** 6;
+        // This is to allow a PEG of 1 MainToken per USDC
+        mainTokenPriceRebase = 85 * 10 ** 4;
+        // 0.85 USDC
         mainTokenPriceCeiling = mainTokenPriceOne.mul(101).div(100);
 
         // Dynamic max expansion percent
-        supplyTiers = [0 ether, 3000000 ether, 4000000 ether, 5000000 ether, 6000000 ether, 6500000 ether, 70000000 ether];
-        maxExpansionTiers = [450, 400, 350, 300, 250, 200, 150];
+        supplyTiers = [0 ether, 500000 ether, 1000000 ether, 1500000 ether, 2000000 ether, 5000000 ether, 10000000 ether, 20000000 ether, 50000000 ether];
+        maxExpansionTiers = [450, 400, 350, 300, 250, 200, 150, 125, 100];
 
         IMainToken(mainToken).grantRebaseExclusion(address(this));
         IMainToken(mainToken).grantRebaseExclusion(address(boardroom));
@@ -229,7 +240,8 @@ contract Treasury is ContractGuard {
     }
 
     function setMainTokenPriceCeiling(uint256 _mainTokenPriceCeiling) external onlyOperator {
-        require(_mainTokenPriceCeiling >= mainTokenPriceOne && _mainTokenPriceCeiling <= mainTokenPriceOne.mul(120).div(100), "out of range"); // [$1.0, $1.2]
+        require(_mainTokenPriceCeiling >= mainTokenPriceOne && _mainTokenPriceCeiling <= mainTokenPriceOne.mul(120).div(100), "out of range");
+        // [$1.0, $1.2]
         mainTokenPriceCeiling = _mainTokenPriceCeiling;
         emit SetMainTokenPriceCeiling(_mainTokenPriceCeiling);
     }
@@ -251,7 +263,8 @@ contract Treasury is ContractGuard {
     function setMaxExpansionTiersEntry(uint8 _index, uint256 _value) external onlyOperator returns (bool) {
         require(_index >= 0, "Index has to be higher than 0");
         require(_index < maxExpansionTiers.length, "Index has to be lower than count of tiers");
-        require(_value >= minPercentExpansionTier && _value <= maxPercentExpansionTier, "_value: out of range"); // [0.1%, 10%]
+        require(_value >= minPercentExpansionTier && _value <= maxPercentExpansionTier, "_value: out of range");
+        // [0.1%, 10%]
         maxExpansionTiers[_index] = _value;
         emit SetMaxExpansionTiersEntry(_index, _value);
         return true;
@@ -294,12 +307,10 @@ contract Treasury is ContractGuard {
         mainTokenErc20.mint(address(this), _amount);
 
         uint256 _daoFundSharedAmount = _amount.mul(daoFundSharedPercent).div(100);
-        address daoFund = mainTokenErc20.getDaoFund();
         mainTokenErc20.transfer(daoFund, _daoFundSharedAmount);
         emit DaoFundFunded(block.timestamp, _daoFundSharedAmount);
 
         uint256 _devFundSharedAmount = _amount.mul(devFundSharedPercent).div(100);
-        address devFund = mainTokenErc20.getDevFund();
         mainTokenErc20.transfer(devFund, _devFundSharedAmount);
         emit DevFundFunded(block.timestamp, _devFundSharedAmount);
 
@@ -328,11 +339,13 @@ contract Treasury is ContractGuard {
 
     function allocateSeigniorage() external onlyOneBlock checkCondition checkEpoch checkOperator {
         _updatePrice();
-        if (epoch > 0) {
-            previousEpochMainPrice = getMainTokenPrice();
+        previousEpochMainPrice = getMainTokenPrice();
+        uint256 mainTokenTotalSupply = IMainToken(mainToken).rebaseSupply();
+        if (epoch < bootstrapEpochs) {
+            _sendToBoardroom(mainTokenTotalSupply.mul(bootstrapSupplyExpansionPercent).div(10000));
+        } else {
             if (previousEpochMainPrice > mainTokenPriceCeiling) {
                 // Expansion
-                uint256 mainTokenTotalSupply = IMainToken(mainToken).rebaseSupply();
                 if (mainTokenTotalSupply < minMainSupplyToExpansion) {
                     mainTokenTotalSupply = minMainSupplyToExpansion;
                 }
@@ -344,7 +357,6 @@ contract Treasury is ContractGuard {
                         _sendToBoardroom(_savedForBoardroom);
                     } else {
                         // mint to DAOFund
-                        address daoFund = IMainToken(mainToken).getDaoFund();
                         IMainToken(mainToken).mint(daoFund, _savedForBoardroom);
                     }
                 }
@@ -362,14 +374,15 @@ contract Treasury is ContractGuard {
                 consecutiveEpochHasPriceBelowOne = 0;
             } else {
                 rebaseStarted = false;
-                // twap <= 0.85 XSHARE => rebase
-                // 6 consecutive epoch has twap < 1 XSHARE => rebase
+                // twap <= 0.85 USDC => rebase
+                // 6 consecutive epoch has twap < 1 USDC => rebase
                 if (previousEpochMainPrice <= mainTokenPriceRebase || consecutiveEpochHasPriceBelowOne == numberOfEpochBelowOneCondition) {
                     _rebase(mainTokenPriceOne);
                     consecutiveEpochHasPriceBelowOne = 0;
                 }
             }
         }
+
     }
 
     function boardroomAllocateSeigniorage(uint256 amount) external onlyOperator {
@@ -378,8 +391,8 @@ contract Treasury is ContractGuard {
 
     function computeSupplyDelta() public view returns (bool negative, uint256 supplyDelta, uint256 targetRate) {
         require(previousEpochMainPrice > 0, "previousEpochMainPrice invalid");
-        targetRate = 10**DECIMALS;
-        uint256 rate = previousEpochMainPrice.mul(10**DECIMALS).div(10**18);
+        targetRate = 10 ** DECIMALS;
+        uint256 rate = previousEpochMainPrice.mul(10 ** DECIMALS).div(10 ** 6);
         negative = rate < targetRate;
         uint256 rebasePercentage = ONE;
         if (negative) {

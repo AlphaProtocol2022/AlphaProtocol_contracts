@@ -7,18 +7,20 @@ import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "../Operator.sol";
 import "../interfaces/IOracle.sol";
+import "../interfaces/IUniswapV2Router01.sol";
+import "../interfaces/IUniswapV2Factory.sol";
 
 
 contract MainToken is ERC20, Operator {
     using SafeMath for uint256;
 
-    // Initial distribution for the first 48h genesis pools
-    uint256 public constant INITIAL_GENESIS_POOL_DISTRIBUTION = 500000 ether;
+    // Initial distribution for the first 24h genesis pools
+    uint256 public constant INITIAL_GENESIS_POOL_DISTRIBUTION = 10000 ether;
 
     // Have the rewards been distributed to the pools
     bool public rewardPoolDistributed;
 
-    uint256 private constant INITIAL_FRAGMENTS_SUPPLY = 1500000 ether;
+    uint256 private constant INITIAL_FRAGMENTS_SUPPLY = 200 ether;
 
     // Rebase
     uint256 private constant MAX_SUPPLY = ~uint128(0);
@@ -50,6 +52,9 @@ contract MainToken is ERC20, Operator {
     bool public enabledTax;
     bool public isSetOracle = false;
 
+    address public dexRouter = address(0x7E5E5957De93D00c352dF75159FbC37d5935f8bF);
+    address public usdcAddress = address(0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174);
+
     /* =================== Events =================== */
     event LogRebase(uint256 indexed epoch, uint256 totalSupply, uint256 prevTotalSupply, uint256 prevRebaseSupply);
     event GrantExclusion(address indexed account);
@@ -64,22 +69,26 @@ contract MainToken is ERC20, Operator {
     event EnableCalculateTax();
     event DisableCalculateTax();
 
-    constructor(address _daoFund, address _devFund) ERC20("XSHIP", "XSHIP") {
-        require(_daoFund != address(0), "!_wethAddress");
-        require(_devFund != address(0), "!_wethAddress");
+    constructor(address _daoFund, address _devFund) ERC20("XUSD", "XUSD") {
+        require(_daoFund != address(0), "!_daoFund");
+        require(_devFund != address(0), "!_devFund");
         rewardPoolDistributed = false;
         _gonsPerFragment = 10 ** 18;
         _totalSupply = 0;
         lastTimeRebase = 0;
         daoFund = _daoFund;
         devFund = _devFund;
-        taxTiersTwaps = [0, 8e17, 9e17, 1e18];
+        taxTiersTwaps = [0, 8e5, 9e5, 1e6];
         taxTiersRates = [1500, 1000, 500, 0];
         taxRateAfterRebase = 2000;
         // 20%
         timeTaxAfterRebase = 24 hours;
-
         taxOffice = msg.sender;
+
+        IUniswapV2Router01 _dexRouter = IUniswapV2Router01(dexRouter);
+        address dexPair = IUniswapV2Factory(_dexRouter.factory()).createPair(address(this), usdcAddress);
+        setMarketLpPairs(dexPair, true);
+
 //        setMarketLpPairs(dexPair, true);
         // Mints 1 token to contract creator for initial pool setup
         _mint(msg.sender, INITIAL_FRAGMENTS_SUPPLY);
@@ -322,11 +331,8 @@ contract MainToken is ERC20, Operator {
         if (enabledTax) {
             uint256 taxAmount = 0;
 
-            if (
-                (marketLpPairs[from] && !excludedTaxAddresses[to])
-                || (marketLpPairs[to] && !excludedTaxAddresses[from])
-            ) {
-                _updatePrice();
+            if (marketLpPairs[to] && !excludedTaxAddresses[from]) {
+//                _updatePrice();
                 uint256 currentTokenPrice = _getTokenPrice();
                 uint256 currentTaxRate = calculateTaxRate(currentTokenPrice);
                 if (currentTaxRate > 0) {
@@ -398,7 +404,7 @@ contract MainToken is ERC20, Operator {
         return _address == daoFund;
     }
 
-    function _getTokenPrice() internal view returns (uint256 _tokenPrice) {
+    function _getTokenPrice() internal view returns (uint256) {
         try IOracle(oracle).consult(address(this), 1e18) returns (uint144 _price) {
             return uint256(_price);
         } catch {

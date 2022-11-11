@@ -9,7 +9,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 import "../../Operator.sol";
 
-contract XShipGenesisPool is Operator, ReentrancyGuard {
+contract GenesisPool is Operator, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
@@ -24,14 +24,15 @@ contract XShipGenesisPool is Operator, ReentrancyGuard {
     // Info of each pool.
     struct PoolInfo {
         IERC20 token; // Address of LP token contract.
-        uint256 allocPoint; // How many allocation points assigned to this pool. xShips to distribute per block.
-        uint256 lastRewardTime; // Last time that xShip distribution occurs.
-        uint256 accXShipPerShare; // Accumulated xShip per share, times 1e18. See below.
+        uint256 allocPoint; // How many allocation points assigned to this pool. tokens to distribute per block.
+        uint256 lastRewardTime; // Last time that token distribution occurs.
+        uint256 accTokenPerShare; // Accumulated token per share, times 1e18. See below.
         bool isStarted; // if lastRewardTime has passed
         uint256 taxRate; // Pool's deposit fee
+        bool canWithdraw; // Use for lock up XSHIP token only
     }
 
-    IERC20 public xship;
+    IERC20 public rewardToken;
 
     // Info of each pool.
     PoolInfo[] public poolInfo;
@@ -42,10 +43,10 @@ contract XShipGenesisPool is Operator, ReentrancyGuard {
     // Total allocation points. Must be the sum of all allocation points in all pools.
     uint256 public totalAllocPoint = 0;
 
-    // The time when xShip mining starts.
+    // The time when token mining starts.
     uint256 public poolStartTime;
 
-    // The time when xShip mining ends.
+    // The time when token mining ends.
     uint256 public poolEndTime;
 
     address public daoFund; //All Deposit Fee (if there is) will be sent to DaoFund
@@ -53,8 +54,8 @@ contract XShipGenesisPool is Operator, ReentrancyGuard {
     uint256 public constant MAX_TAX_RATE = 400; // Max = 400/10000*100 = 4%
 
     uint256 public tokenPerSecond;
-    uint256 public runningTime = 2 days;
-    uint256 public constant TOTAL_REWARDS = 500000 ether;
+    uint256 public runningTime = 24 hours;
+    uint256 public constant TOTAL_REWARDS = 10000 ether;
 
     bool public migrated = false;
 
@@ -65,13 +66,13 @@ contract XShipGenesisPool is Operator, ReentrancyGuard {
     event MigrateRewardPool(address indexed newRewardPool);
 
     constructor(
-        address _xship,
+        address _rewardToken,
         uint256 _poolStartTime,
         address _daoFund
     ) public {
         require(block.timestamp < _poolStartTime, "late");
-        require(_xship != address(0), "!xShip" );
-        xship = IERC20(_xship);
+        require(_rewardToken != address(0), "!token");
+        rewardToken = IERC20(_rewardToken);
         poolStartTime = _poolStartTime;
         poolEndTime = poolStartTime + runningTime;
         tokenPerSecond = TOTAL_REWARDS.div(runningTime);
@@ -81,7 +82,7 @@ contract XShipGenesisPool is Operator, ReentrancyGuard {
     function checkPoolDuplicate(IERC20 _token) internal view {
         uint256 length = poolInfo.length;
         for (uint256 pid = 0; pid < length; ++pid) {
-            require(poolInfo[pid].token != _token, "xShipRewardPool: existing pool?");
+            require(poolInfo[pid].token != _token, "tokenRewardPool: existing pool?");
         }
     }
 
@@ -91,13 +92,16 @@ contract XShipGenesisPool is Operator, ReentrancyGuard {
         IERC20 _token,
         bool _withUpdate,
         uint256 _lastRewardTime,
-        uint256 _taxRate
+        uint256 _taxRate,
+        bool _canWithdraw
     ) public onlyOperator {
         require(_taxRate >= MIN_TAX_RATE && _taxRate <= MAX_TAX_RATE, "Exceed tax rate range");
         checkPoolDuplicate(_token);
+
         if (_withUpdate) {
             massUpdatePools();
         }
+
         if (block.timestamp < poolStartTime) {
             // chef is sleeping
             if (_lastRewardTime == 0) {
@@ -120,16 +124,17 @@ contract XShipGenesisPool is Operator, ReentrancyGuard {
         token : _token,
         allocPoint : _allocPoint,
         lastRewardTime : _lastRewardTime,
-        accXShipPerShare : 0,
+        accTokenPerShare : 0,
         isStarted : _isStarted,
-        taxRate : _taxRate
+        taxRate : _taxRate,
+        canWithdraw : _canWithdraw
         }));
         if (_isStarted) {
             totalAllocPoint = totalAllocPoint.add(_allocPoint);
         }
     }
 
-    // Update the given pool's xShip allocation point. Can only be called by the owner.
+    // Update the given pool's token allocation point. Can only be called by the owner.
     function set(uint256 _pid, uint256 _allocPoint) public onlyOperator {
         massUpdatePools();
         PoolInfo storage pool = poolInfo[_pid];
@@ -155,18 +160,18 @@ contract XShipGenesisPool is Operator, ReentrancyGuard {
         }
     }
 
-    // View function to see pending xShip on frontend.
+    // View function to see pending token on frontend.
     function pendingShare(uint256 _pid, address _user) external view returns (uint256) {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_user];
-        uint256 accXShipPerShare = pool.accXShipPerShare;
+        uint256 accTokenPerShare = pool.accTokenPerShare;
         uint256 tokenSupply = pool.token.balanceOf(address(this));
         if (block.timestamp > pool.lastRewardTime && tokenSupply != 0) {
             uint256 _generatedReward = getGeneratedReward(pool.lastRewardTime, block.timestamp);
-            uint256 _xshipReward = _generatedReward.mul(pool.allocPoint).div(totalAllocPoint);
-            accXShipPerShare = accXShipPerShare.add(_xshipReward.mul(1e18).div(tokenSupply));
+            uint256 _tokenReward = _generatedReward.mul(pool.allocPoint).div(totalAllocPoint);
+            accTokenPerShare = accTokenPerShare.add(_tokenReward.mul(1e18).div(tokenSupply));
         }
-        return user.amount.mul(accXShipPerShare).div(1e18).sub(user.rewardDebt);
+        return user.amount.mul(accTokenPerShare).div(1e18).sub(user.rewardDebt);
     }
 
     // Update reward variables for all pools. Be careful of gas spending!
@@ -194,8 +199,8 @@ contract XShipGenesisPool is Operator, ReentrancyGuard {
         }
         if (totalAllocPoint > 0) {
             uint256 _generatedReward = getGeneratedReward(pool.lastRewardTime, block.timestamp);
-            uint256 _xshipReward = _generatedReward.mul(pool.allocPoint).div(totalAllocPoint);
-            pool.accXShipPerShare = pool.accXShipPerShare.add(_xshipReward.mul(1e18).div(tokenSupply));
+            uint256 _tokenReward = _generatedReward.mul(pool.allocPoint).div(totalAllocPoint);
+            pool.accTokenPerShare = pool.accTokenPerShare.add(_tokenReward.mul(1e18).div(tokenSupply));
         }
         pool.lastRewardTime = block.timestamp;
     }
@@ -207,9 +212,9 @@ contract XShipGenesisPool is Operator, ReentrancyGuard {
         UserInfo storage user = userInfo[_pid][_sender];
         updatePool(_pid);
         if (user.amount > 0) {
-            uint256 _pending = user.amount.mul(pool.accXShipPerShare).div(1e18).sub(user.rewardDebt);
+            uint256 _pending = user.amount.mul(pool.accTokenPerShare).div(1e18).sub(user.rewardDebt);
             if (_pending > 0) {
-                safeXShipTransfer(_sender, _pending);
+                safeTokenTransfer(_sender, _pending);
                 emit RewardPaid(_sender, _pending);
             }
         }
@@ -230,7 +235,7 @@ contract XShipGenesisPool is Operator, ReentrancyGuard {
             pool.token.safeTransferFrom(_sender, daoFund, _taxAmount);
             user.amount = user.amount.add(_amount_post_fee);
         }
-        user.rewardDebt = user.amount.mul(pool.accXShipPerShare).div(1e18);
+        user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(1e18);
         emit Deposit(_sender, _pid, _amount);
     }
 
@@ -241,12 +246,14 @@ contract XShipGenesisPool is Operator, ReentrancyGuard {
         UserInfo storage user = userInfo[_pid][_sender];
         require(user.amount >= _amount, "withdraw: not good");
         updatePool(_pid);
-        uint256 _pending = user.amount.mul(pool.accXShipPerShare).div(1e18).sub(user.rewardDebt);
+        uint256 _pending = user.amount.mul(pool.accTokenPerShare).div(1e18).sub(user.rewardDebt);
         if (_pending > 0) {
-            safeXShipTransfer(_sender, _pending);
+            safeTokenTransfer(_sender, _pending);
             emit RewardPaid(_sender, _pending);
         }
+        // Can withdraw will be enabled to token pool only, the pool will lockup token and remove it from circulating supply
         if (_amount > 0) {
+            require(pool.canWithdraw, "Can not withdraw from pool");
             user.amount = user.amount.sub(_amount);
             pool.token.safeTransfer(_sender, _amount);
             if (user.amount == 0) {
@@ -254,7 +261,7 @@ contract XShipGenesisPool is Operator, ReentrancyGuard {
                 user.withdrawTimestamp = block.timestamp;
             }
         }
-        user.rewardDebt = user.amount.mul(pool.accXShipPerShare).div(1e18);
+        user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(1e18);
         emit Withdraw(_sender, _pid, _amount);
     }
 
@@ -262,6 +269,7 @@ contract XShipGenesisPool is Operator, ReentrancyGuard {
     function emergencyWithdraw(uint256 _pid) public nonReentrant {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
+        require(_pid != 0, "XSHIP pool can not be withdrawn");
         uint256 _amount = user.amount;
         user.amount = 0;
         user.rewardDebt = 0;
@@ -276,26 +284,26 @@ contract XShipGenesisPool is Operator, ReentrancyGuard {
 
         migrated = true;
         tokenPerSecond = 0;
-        safeXShipTransfer(_newRewardPool, TOTAL_REWARDS);
+        safeTokenTransfer(_newRewardPool, TOTAL_REWARDS);
 
         emit MigrateRewardPool(_newRewardPool);
     }
 
-    // Safe xShip transfer function, just in case if rounding error causes pool to not have enough xShip.
-    function safeXShipTransfer(address _to, uint256 _amount) internal {
-        uint256 _xshipBal = xship.balanceOf(address(this));
-        if (_xshipBal > 0) {
-            if (_amount > _xshipBal) {
-                xship.safeTransfer(_to, _xshipBal);
+    // Safe token transfer function, just in case if rounding error causes pool to not have enough token.
+    function safeTokenTransfer(address _to, uint256 _amount) internal {
+        uint256 _tokenBal = rewardToken.balanceOf(address(this));
+        if (_tokenBal > 0) {
+            if (_amount > _tokenBal) {
+                rewardToken.safeTransfer(_to, _tokenBal);
             } else {
-                xship.safeTransfer(_to, _amount);
+                rewardToken.safeTransfer(_to, _amount);
             }
         }
     }
 
-    function updateXShipPerSec(uint256 _new_xShipPerSec) public onlyOperator {
-        require(_new_xShipPerSec >= 0, "Invalid amount");
-        tokenPerSecond = _new_xShipPerSec;
+    function updateRewardPerSec(uint256 _new_xTokenPerSec) public onlyOperator {
+        require(_new_xTokenPerSec >= 0, "Invalid amount");
+        tokenPerSecond = _new_xTokenPerSec;
     }
 
     function setPoolTaxRate(uint256 _pid, uint256 _new_tax_rate) public onlyOperator {
@@ -306,8 +314,8 @@ contract XShipGenesisPool is Operator, ReentrancyGuard {
 
     function governanceRecoverUnsupported(IERC20 _token, uint256 amount, address to) external onlyOperator {
         if (block.timestamp < poolEndTime + 90 days) {
-            // do not allow to drain core token (xShip or lps) if less than 90 days after pool ends
-            require(_token != xship, "xShip");
+            // do not allow to drain core token (XUSD or lps) if less than 90 days after pool ends
+            require(_token != rewardToken, "token");
             uint256 length = poolInfo.length;
             for (uint256 pid = 0; pid < length; ++pid) {
                 PoolInfo storage pool = poolInfo[pid];
@@ -320,5 +328,10 @@ contract XShipGenesisPool is Operator, ReentrancyGuard {
     function setDaoFund(address _daoFund) external onlyOperator {
         require(_daoFund != address(0), "Invalid address");
         daoFund = _daoFund;
+    }
+
+    function setCanWithdraw(bool _canWithdraw, uint256 _pid) external onlyOperator {
+        PoolInfo storage pool = poolInfo[_pid];
+        pool.canWithdraw = _canWithdraw;
     }
 }
