@@ -16,9 +16,7 @@ import "./../interfaces/IMultiAssetPool.sol";
 import "./../interfaces/IUniswapV2Router01.sol";
 import "../Operator.sol";
 
-contract MultiAssetPoolV2
-    is Operator, ReentrancyGuard, IMultiAssetPool
-{
+contract MultiAssetPoolV2 is Operator, ReentrancyGuard, IMultiAssetPool {
     using SafeMath for uint256;
     using SafeERC20 for ERC20;
 
@@ -205,48 +203,24 @@ contract MultiAssetPoolV2
         (uint256 _asset_out, uint256 _collateral_to_buy_xShare, uint256 _fee_collect, uint256 _collateral_to_reserve) = calcMint(_collateral_amount, _assetId, _assetStat.missing_decimals);
 
         ERC20(_collateral).safeTransferFrom(msg.sender, address(this), _collateral_amount);
-        _transferCollateralToReserve(_collateral_to_reserve, _assetId);
+
+        if (_collateral_to_reserve > 0) {
+            _transferCollateralToReserve(_collateral_to_reserve, _assetId);
+        }
 
         uint256 xshareBought = 0;
+
         if (_collateral_to_buy_xShare > 0) {
             xshareBought = _swapToXshare(_collateral, _assetStat.collat_main_liq_pair, _collateral_to_buy_xShare);
             IAsset(xShare).burn(xshareBought);
         }
-        // build swap function
 
-        // Calc actual asset out = amount - amount * mint fee
-        // calc amount to swap = actual asset out * ( 100 - tcr)
-        // calc amount collateral to transfer: actual asset out - amount to swap
-        // transfer collateral to col reserve
-        // build path to swap
-        // swap collateral to xShare
-        // burn xshare
-
-
-        //        uint256 _fee_collect = _collateral_amount.mul(_minting_fee).div(PRICE_PRECISION);
-        //        uint256 _actual_asset_amount = _collateral_amount.sub(_fee_collect);
-        //
-        //        uint256 collateral_to_buy_xshare = 0;
-        //        if (_tcr > 0) {
-        //            uint256 collateral_to_reserve = _actual_asset_amount.mul(_tcr).div(COLLATERAL_RATIO_PRECISION);
-        //            collateral_to_buy_xshare = _actual_asset_amount.sub(collateral_to_reserve);
-        //        } else {
-        //            collateral_to_buy_xshare = _actual_asset_amount;
-        ////            _required_share_amount = _share_amount;
-        ////            _actual_asset_amount = _share_amount.mul(_share_price).div(PRICE_PRECISION);
-        //        }
-
-
-        //        if (_collateral_amount > 0) {
-        //            _transferCollateralToReserve(msg.sender, _collateral_amount, _assetId);
-        //            _assetStat.uncollectedFee = _assetStat.uncollectedFee.add(_fee_collect);
-        //        }
         _assetStat.uncollectedFee = _assetStat.uncollectedFee.add(_fee_collect);
         _assetStat.netMinted = _assetStat.netMinted.add(_asset_out);
 
         IAsset(_asset).poolMint(msg.sender, _asset_out);
 
-        emit Minted(msg.sender, _collateral_amount, xshareBought, asset_out);
+        emit Minted(msg.sender, _collateral_amount, xshareBought, _asset_out);
     }
 
     function calcRedeem(
@@ -378,6 +352,7 @@ contract MultiAssetPoolV2
         IERC20(input_token).approve(router, inputAmount);
 
         address[] memory _path;
+
         if (input_token != bridgeToken) {
             _path = new address[](3);
             _path[0] = input_token;
