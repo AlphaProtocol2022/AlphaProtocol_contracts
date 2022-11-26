@@ -19,8 +19,8 @@ contract ShareWrapper {
     using SafeERC20 for ERC20;
 
     ERC20 public share;
-    uint256 public stakeFee = 200;
-    uint256 public withdrawFee = 200;
+    uint256 public stakeFee = 0;
+    uint256 public withdrawFee = 500;
     address public daoFund;
     uint256 private _totalSupply;
     mapping(address => uint256) private _balances;
@@ -147,8 +147,8 @@ contract Boardroom is ShareWrapper, ContractGuard {
         MasonrySnapshot memory genesisSnapshot = MasonrySnapshot({time: block.number, rewardReceived: 0, rewardPerShare: 0});
         masonryHistory.push(genesisSnapshot);
 
-        withdrawLockupEpochs = 4; // Lock for 4 epochs (24h) before release withdraw
-        rewardLockupEpochs = 2; // Lock for 2 epochs (12h) before release claimReward
+        withdrawLockupEpochs = 8; // Lock for 4 epochs (24h) before release withdraw
+        rewardLockupEpochs = 4; // Lock for 2 epochs (12h) before release claimReward
 
         initialized = true;
         operator = msg.sender;
@@ -236,12 +236,12 @@ contract Boardroom is ShareWrapper, ContractGuard {
         require(amount > 0, "Boardroom: Cannot withdraw 0");
         require(masons[msg.sender].epochTimerStart.add(withdrawLockupEpochs) <= treasury.epoch(), "Boardroom: still in withdraw lockup");
         claimReward();
-        // Get 2% fee when protocol in contraction phase
         super.withdraw(amount, getMainTokenPrice());
         emit Withdrawn(msg.sender, amount);
     }
 
     function exit() external {
+        claimReward();
         withdraw(balanceOf(msg.sender), getMainTokenPrice());
     }
 

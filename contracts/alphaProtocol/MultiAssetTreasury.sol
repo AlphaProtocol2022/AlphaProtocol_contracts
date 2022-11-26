@@ -111,7 +111,7 @@ contract MultiAssetTreasury is IMultiAssetTreasury, Operator, ReentrancyGuard {
     /* ========== CONSTRUCTOR ========== */
 
     constructor(address _router) public {
-        ratio_step = 2500;
+        ratio_step = 200;
         // = 0.25% at 6 decimals of precision
         refresh_cooldown = 3600;
         // Refresh cooldown period is set to 1 hour (3600 seconds) at genesis
@@ -398,14 +398,14 @@ contract MultiAssetTreasury is IMultiAssetTreasury, Operator, ReentrancyGuard {
         emit Recollateralized(_share_amount, out_collateral_amount);
     }
 
-    // Add asset CollateralPolicy - Only called by AssetController
+    // Add asset CollateralPolicy - Only called by AssetController & Operator
     function addCollateralPolicy(uint256 _aid, uint256 _price_band, uint256 _missing_decimals, uint256 _init_tcr, uint256 _init_ecr) external override onlyAssetControllerOrOperator {
         CollateralPolicy storage _collateralPolicy = assetCollateralPolicy[_aid];
         _collateralPolicy.target_collateral_ratio = _init_tcr;
         _collateralPolicy.effective_collateral_ratio = _init_ecr;
         _collateralPolicy.price_band = _price_band;
         _collateralPolicy.missing_decimals = _missing_decimals;
-        _collateralPolicy.price_target = 1e18 - _missing_decimals;
+        _collateralPolicy.price_target = 10 ** (uint256(18).sub(_missing_decimals));
     }
 
     // Add new Pool
@@ -490,6 +490,11 @@ contract MultiAssetTreasury is IMultiAssetTreasury, Operator, ReentrancyGuard {
     function setMissingDecimals(uint256 _missing_decimals, uint256 _assetId) external override onlyAssetControllerOrOperator {
         CollateralPolicy storage _collateralPolicy = assetCollateralPolicy[_assetId];
         _collateralPolicy.missing_decimals = _missing_decimals;
+    }
+
+    function setPriceTarget(uint256 _price_target, uint256 _assetId) external onlyAssetControllerOrOperator {
+        CollateralPolicy storage _collateralPolicy = assetCollateralPolicy[_assetId];
+        _collateralPolicy.price_target = _price_target;
     }
 
     function setCollateralFund(address _collateralFund) public onlyOperator {

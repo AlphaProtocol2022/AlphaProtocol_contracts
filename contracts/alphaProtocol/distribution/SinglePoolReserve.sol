@@ -31,6 +31,10 @@ contract SinglePoolReserve is Operator, ICurrencyReserve {
         return IERC20(xShare).balanceOf(address(this));
     }
 
+    function setSinglePool(address _singlePool) public onlyOperator {
+        xShareSinglePool = _singlePool;
+    }
+
     function transferTo(
         address _token,
         address _receiver,

@@ -347,7 +347,7 @@ contract MultiAssetPoolV2 is Operator, ReentrancyGuard, IMultiAssetPool {
 
     /* ========== INTERNAL FUNCTIONS ========== */
 
-    function _swapToXshare(address input_token, address bridgeToken, uint256 inputAmount) public onlyOperator returns (uint256) {
+    function _swapToXshare(address input_token, address bridgeToken, uint256 inputAmount) internal returns (uint256) {
         IERC20(input_token).approve(router, 0);
         IERC20(input_token).approve(router, inputAmount);
 
