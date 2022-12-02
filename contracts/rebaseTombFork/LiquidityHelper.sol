@@ -64,7 +64,7 @@ contract LiquidityHelper is Operator, ContractGuard {
             block.timestamp
         );
         require (liquidity >= _minAmountLp, "lpAmt < minAmount quoted");
-        _dustDistribution(_amountA, _amountB, amountA, amountB, _tokenA, _tokenB, msg.sender);
+        _dustDistribution(_amountA, _amountB, amountA, amountB, _tokenA, _tokenB, tx.origin);
     }
 
     function removeLiquidity(address _lpAddress, uint256 _amount) external lock onlyOneBlock {

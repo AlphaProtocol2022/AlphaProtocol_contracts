@@ -3,9 +3,10 @@ pragma solidity ^0.8.7;
 import "../interfaces/IHyperswapRouter01.sol";
 import "../interfaces/IUniswapV2Pair.sol";
 import "../interfaces/IUniswapV2Router01.sol";
+import "../interfaces/IUniswapV2Factory.sol";
 import "../interfaces/IZap.sol";
 import "../lib/TransferHelper.sol";
-
+import "../interfaces/ILiquidityHelper.sol";
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
@@ -21,11 +22,12 @@ contract zapper is Ownable, IZap {
 
     address private WNATIVE;
     address public validRouter;
+    address public liqHelper = address(0xBC1FaBd34d61B346F40712a80482DcAE5df76291);
 
     mapping(address => mapping(address => address)) private tokenBridgeForRouter;
     mapping(address => bool) public isFeeOnTransfer;
 
-    mapping (address => bool) public useNativeRouter;
+    mapping(address => bool) public useNativeRouter;
 
     constructor(address _WNATIVE) Ownable() {
         WNATIVE = _WNATIVE;
@@ -59,7 +61,7 @@ contract zapper is Ownable, IZap {
 
     function estimateZapInToken(address _from, address _to, address _router, uint _amt) authRouter(_router) public view override returns (uint256, uint256) {
         // get pairs for desired lp
-        if (_from == IUniswapV2Pair(_to).token0() || _from == IUniswapV2Pair(_to).token1()) { // check if we already have one of the assets
+        if (_from == IUniswapV2Pair(_to).token0() || _from == IUniswapV2Pair(_to).token1()) {// check if we already have one of the assets
             // if so, we're going to sell half of _from for the other token we need
             // figure out which token we need, and approve
             address other = _from == IUniswapV2Pair(_to).token0() ? IUniswapV2Pair(_to).token1() : IUniswapV2Pair(_to).token0();
@@ -76,12 +78,12 @@ contract zapper is Ownable, IZap {
             // go through native token for highest liquidity
             uint nativeAmount = _from == WNATIVE ? _amt : _estimateSwap(_from, _amt, WNATIVE, _router);
             if (WNATIVE == IUniswapV2Pair(_to).token0()) {
-                return (nativeAmount.div(2), _estimateSwap(WNATIVE, nativeAmount.div(2), IUniswapV2Pair(_to).token1(), _router ));
+                return (nativeAmount.div(2), _estimateSwap(WNATIVE, nativeAmount.div(2), IUniswapV2Pair(_to).token1(), _router));
             }
             if (WNATIVE == IUniswapV2Pair(_to).token1()) {
-                return (_estimateSwap(WNATIVE, nativeAmount.div(2), IUniswapV2Pair(_to).token0(), _router ), nativeAmount.div(2));
+                return (_estimateSwap(WNATIVE, nativeAmount.div(2), IUniswapV2Pair(_to).token0(), _router), nativeAmount.div(2));
             }
-            return (_estimateSwap(WNATIVE, nativeAmount.div(2), IUniswapV2Pair(_to).token0(), _router ), _estimateSwap(WNATIVE, nativeAmount.div(2), IUniswapV2Pair(_to).token1(), _router));
+            return (_estimateSwap(WNATIVE, nativeAmount.div(2), IUniswapV2Pair(_to).token0(), _router), _estimateSwap(WNATIVE, nativeAmount.div(2), IUniswapV2Pair(_to).token1(), _router));
         }
     }
 
@@ -183,18 +185,28 @@ contract zapper is Ownable, IZap {
 
     function _swapTokenToLP(address _from, uint amount, address _to, address recipient, address routerAddr) private returns (uint) {
         // get pairs for desired lp
-        if (_from == IUniswapV2Pair(_to).token0() || _from == IUniswapV2Pair(_to).token1()) { // check if we already have one of the assets
+        if (_from == IUniswapV2Pair(_to).token0() || _from == IUniswapV2Pair(_to).token1()) {// check if we already have one of the assets
             // if so, we're going to sell half of _from for the other token we need
             // figure out which token we need, and approve
             address other = _from == IUniswapV2Pair(_to).token0() ? IUniswapV2Pair(_to).token1() : IUniswapV2Pair(_to).token0();
             _approveTokenIfNeeded(other, routerAddr);
             // calculate amount of _from to sell
             uint sellAmount = amount.div(2);
+            address factory = IUniswapV2Router01(routerAddr).factory();
+            address lpPair = IUniswapV2Factory(factory).getPair(_from, other);
             // execute swap
             uint otherAmount = _swap(_from, sellAmount, other, address(this), routerAddr);
-            uint liquidity;
-            ( , , liquidity) = IUniswapV2Router01(routerAddr).addLiquidity(_from, other, amount.sub(sellAmount), otherAmount, 0, 0, recipient, block.timestamp);
-            return liquidity;
+//            uint256 lpAmount_prev = IERC20(lpPair).balanceOf(address(this));
+            _approveTokenIfNeeded(_from, liqHelper);
+            _approveTokenIfNeeded(other, liqHelper);
+            ILiquidityHelper(liqHelper).addLiquidity(_from, other, amount.sub(sellAmount), otherAmount, 0);
+//            uint256 lpAmount_after = IERC20(lpPair).balanceOf(address(this));
+//            uint256 lp_formed = lpAmount_after.sub(lpAmount_prev);
+            uint lp_formed = IERC20(lpPair).balanceOf(address(this));
+            IERC20(lpPair).safeTransfer(recipient, lp_formed);
+//            uint liquidity;
+//            (,, liquidity) = IUniswapV2Router01(routerAddr).addLiquidity(_from, other, amount.sub(sellAmount), otherAmount, 0, 0, recipient, block.timestamp);
+            return lp_formed;
         } else {
             // go through native token for highest liquidity
             uint nativeAmount = _swapTokenForNative(_from, amount, address(this), routerAddr);
@@ -210,9 +222,9 @@ contract zapper is Ownable, IZap {
         uint liquidity;
         if (token0 == WNATIVE || token1 == WNATIVE) {
             address token = token0 == WNATIVE ? token1 : token0;
-            ( , , liquidity) = _swapHalfNativeAndProvide(token, amount, routerAddress, recipient);
+            (,, liquidity) = _swapHalfNativeAndProvide(token, amount, routerAddress, recipient);
         } else {
-            ( , , liquidity) = _swapNativeToEqualTokensAndProvide(token0, token1, amount, routerAddress, recipient);
+            (,, liquidity) = _swapNativeToEqualTokensAndProvide(token0, token1, amount, routerAddress, recipient);
         }
         return liquidity;
     }
@@ -292,7 +304,7 @@ contract zapper is Ownable, IZap {
 
         address[] memory path;
 
-        if (fromBridge != address(0) && toBridge != address(0)) { // both have bridge
+        if (fromBridge != address(0) && toBridge != address(0)) {// both have bridge
             if (fromBridge != toBridge) {
                 path = new address[](5);
                 path[0] = _from;
@@ -306,7 +318,7 @@ contract zapper is Ownable, IZap {
                 path[1] = fromBridge;
                 path[2] = _to;
             }
-        } else if (fromBridge != address(0)) { // from has bridge
+        } else if (fromBridge != address(0)) {// from has bridge
             if (fromBridge == _to) {
                 path = new address[](2);
                 path[0] = _from;
@@ -324,7 +336,7 @@ contract zapper is Ownable, IZap {
                 path[2] = WNATIVE;
                 path[3] = _to;
             }
-        } else if (toBridge != address(0)) { // only _to ha a bridge, not _from
+        } else if (toBridge != address(0)) {// only _to ha a bridge, not _from
             if (_from == toBridge) {
                 path = new address[](2);
                 path[0] = _from;
@@ -453,6 +465,10 @@ contract zapper is Ownable, IZap {
 
     function setValidRouter(address _validRouter) external onlyOwner {
         validRouter = _validRouter;
+    }
+
+    function setLiquidityHelper(address _liqHelper) external onlyOwner {
+        liqHelper = _liqHelper;
     }
 
     function withdraw(address token) external onlyOwner {
