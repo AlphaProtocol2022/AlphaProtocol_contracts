@@ -166,6 +166,11 @@ contract Boardroom is ShareWrapper, ContractGuard {
         rewardLockupEpochs = _rewardLockupEpochs;
     }
 
+    function setTreasury(address _treasury) external onlyOperator {
+        require(_treasury != address(0), "Invalid address");
+        treasury = ITreasury(_treasury);
+    }
+
     /* ========== VIEW FUNCTIONS ========== */
 
     // =========== Snapshot getters

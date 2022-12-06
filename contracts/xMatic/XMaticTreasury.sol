@@ -32,7 +32,7 @@ contract XMaticTreasury is ContractGuard {
     uint256 public epoch;
     uint256 public previousEpoch;
     uint256 public epochSupplyContractionLeft;
-    uint256 public bootstrapEpochs = 28;
+    uint256 public bootstrapEpochs = 0;
     uint256 public bootstrapSupplyExpansionPercent = 300;
 
     address public mainToken;
@@ -48,11 +48,14 @@ contract XMaticTreasury is ContractGuard {
 
     uint256[] public supplyTiers;
     uint256[] public maxExpansionTiers;
+    uint256[] public minExpansionTiers;
 
     /*===== Rebase ====*/
     uint256 public numberOfEpochBelowOneCondition = 1;
     uint256 private constant DECIMALS = 18;
     uint256 private constant ONE = uint256(10 ** DECIMALS);
+    uint256 private TWAP_FOR_MAX_EXPANSION = 12e17;
+    uint256 private TWAP_DELTA_FOR_MAX_EXPANSION = 2e17;
     // Due to the expression in computeSupplyDelta(), MAX_RATE * MAX_SUPPLY must fit into an int256.
     // Both are 18 decimals fixed point numbers.
     uint256 private constant MAX_RATE = 10 ** 18 * 10 ** DECIMALS;
@@ -66,6 +69,9 @@ contract XMaticTreasury is ContractGuard {
     uint256 public previousEpochMainPrice;
 
     uint256 public constant minMainSupplyToExpansion = 10000 ether;
+
+    uint256 public MIN_EXPANSION_RATE = 100; // 1%
+    bool public useFixedTwap = false;
 
     /*===== End Rebase ====*/
 
@@ -98,17 +104,8 @@ contract XMaticTreasury is ContractGuard {
     event SetMainTokenPriceCeiling(uint256 newValue);
     event SetSupplyTiersEntry(uint8 _index, uint256 _value);
     event SetMaxExpansionTiersEntry(uint8 _index, uint256 _value);
+    event SetMinExpansionTiersEntry(uint8 _index, uint256 _value);
     event TransactionExecuted(address indexed target, uint256 value, string signature, bytes data);
-
-    function __Upgradeable_Init() external onlyOperator {
-        initialized = false;
-        epoch = 0;
-        previousEpoch = 0;
-        epochSupplyContractionLeft = 0;
-        consecutiveEpochHasPriceBelowOne = 0;
-        rebaseStarted = false;
-        previousEpochMainPrice = 0;
-    }
 
     function setNumberOfEpochToRebase(uint256 _numberOfEpoc) public onlyOperator {
         numberOfEpochBelowOneCondition = _numberOfEpoc;
@@ -137,7 +134,6 @@ contract XMaticTreasury is ContractGuard {
 
     modifier checkOperator() {
         require(
-            IBasisAsset(mainToken).operator() == address(this) &&
             Operator(boardroom).operator() == address(this),
             "Treasury: need more permission"
         );
@@ -171,7 +167,7 @@ contract XMaticTreasury is ContractGuard {
         }
     }
 
-    function getTwapPrice() external view returns (uint256) {
+    function getTwapPrice() public view returns (uint256) {
         try IOracle(oracle).twap(mainToken, 1e18) returns (uint144 price) {
             return uint256(price);
         } catch {
@@ -188,7 +184,9 @@ contract XMaticTreasury is ContractGuard {
         address _boardroom,
         address _daoFund,
         address _devFund,
-        uint256 _startTime
+        uint256 _startTime,
+        uint256 _epoch
+
     ) external notInitialized {
         require(_mainToken != address(0), "!_mainToken");
         require(_shareToken != address(0), "!_shareToken");
@@ -209,13 +207,15 @@ contract XMaticTreasury is ContractGuard {
         // This is to allow a PEG of 1 MainToken per USDC
         mainTokenPriceRebase = 85 * 10 ** 16;
         // 0.85 USDC
-        mainTokenPriceCeiling = mainTokenPriceOne.mul(101).div(100);
+        mainTokenPriceCeiling = mainTokenPriceOne;
 
         // Dynamic max expansion percent
         supplyTiers = [0 ether, 500000 ether, 2000000 ether, 4000000 ether, 8000000 ether, 20000000 ether];
         maxExpansionTiers = [300, 250, 200, 150, 125, 100];
+        minExpansionTiers = [100, 85, 70, 55, 40, 40];
 
         IMainToken(mainToken).grantRebaseExclusion(address(this));
+        IMainToken(mainToken).grantRebaseExclusion(daoFund);
         IMainToken(mainToken).grantRebaseExclusion(address(boardroom));
 
         initialized = true;
@@ -274,6 +274,21 @@ contract XMaticTreasury is ContractGuard {
         return true;
     }
 
+    function setMinExpansionTiersEntry(uint8 _index, uint256 _value) external onlyOperator returns (bool) {
+        require(_index >= 0, "Index has to be higher than 0");
+        require(_index < minExpansionTiers.length, "Index has to be lower than count of tiers");
+        require(_value >= minPercentExpansionTier && _value <= maxPercentExpansionTier, "_value: out of range");
+        // [0.1%, 10%]
+        minExpansionTiers[_index] = _value;
+        emit SetMinExpansionTiersEntry(_index, _value);
+        return true;
+    }
+
+    function setTwapForMaxExpansion(uint256 _twapThresold) external onlyOperator {
+        TWAP_FOR_MAX_EXPANSION = _twapThresold;
+        TWAP_DELTA_FOR_MAX_EXPANSION = _twapThresold.sub(mainTokenPriceOne);
+    }
+
     /* ========== MUTABLE FUNCTIONS ========== */
     function syncPrice() public {
         try IOracle(oracle).sync() {} catch {
@@ -297,7 +312,7 @@ contract XMaticTreasury is ContractGuard {
             mainTokenTotalSupply = minMainSupplyToExpansion;
         }
 
-        uint256 percentage = calculateMaxSupplyExpansionPercent(mainTokenTotalSupply);
+        uint256 percentage = calcExpansionRate(mainTokenTotalSupply);
         uint256 estimatedReward = mainTokenTotalSupply.mul(percentage).div(10000);
 
         uint256 _daoFundSharedAmount = estimatedReward.mul(daoFundSharedPercent).div(100);
@@ -341,10 +356,53 @@ contract XMaticTreasury is ContractGuard {
         return maxSupplyExpansionPercent;
     }
 
+    function calculateMinSupplyExpansionPercent(uint256 _mainTokenSupply) public view returns (uint256) {
+        uint256 minSupplyExpansionPercent;
+        uint256 supplyTierLength = supplyTiers.length;
+        uint256 minExpansionTiersLength = minExpansionTiers.length;
+        require(supplyTierLength == minExpansionTiersLength, "SupplyTier data invalid");
+
+        for (uint256 tierId = supplyTierLength - 1; tierId >= 0; --tierId) {
+            if (_mainTokenSupply >= supplyTiers[tierId]) {
+                minSupplyExpansionPercent = minExpansionTiers[tierId];
+                break;
+            }
+        }
+
+        return minSupplyExpansionPercent;
+    }
+
+    function calcDynamicExpansionPercent(uint256 _mainTokenSupply) public view returns (uint256 _percent) {
+        uint256 max_expansion = calculateMaxSupplyExpansionPercent(_mainTokenSupply);
+        uint256 min_expansion = calculateMinSupplyExpansionPercent(_mainTokenSupply);
+        uint256 twap = getMainTokenPrice();
+        uint256 twap_delta = twap.sub(mainTokenPriceOne);
+        uint256 average_rate = (max_expansion.add(min_expansion)).div(2);
+        //        _percent = twap_delta.mul(1e6).div(TWAP_DELTA_FOR_MAX_EXPANSION).mul(average_rate).add(min_expansion);
+        _percent = average_rate.mul(1e18).div(TWAP_DELTA_FOR_MAX_EXPANSION).mul(twap_delta).div(1e18);
+        _percent = _percent.add(min_expansion);
+
+        if (_percent < min_expansion) {
+            _percent = min_expansion;
+        }
+
+        if (_percent > max_expansion) {
+            _percent = max_expansion;
+        }
+    }
+
+    function calcExpansionRate(uint256 _mainTokenSupply) public view returns(uint256 _expansion_rate) {
+        if (useFixedTwap) {
+            _expansion_rate = calculateMaxSupplyExpansionPercent(_mainTokenSupply);
+        } else {
+            _expansion_rate = calcDynamicExpansionPercent(_mainTokenSupply);
+        }
+    }
+
     function allocateSeigniorage() external onlyOneBlock checkCondition checkEpoch checkOperator {
         _updatePrice();
         previousEpochMainPrice = getMainTokenPrice();
-        uint256 mainTokenTotalSupply = IMainToken(mainToken).rebaseSupply();
+        uint256 mainTokenTotalSupply = IMainToken(mainToken).totalSupply();
         if (epoch < bootstrapEpochs) {
             _sendToBoardroom(mainTokenTotalSupply.mul(bootstrapSupplyExpansionPercent).div(10000));
         } else {
@@ -353,7 +411,7 @@ contract XMaticTreasury is ContractGuard {
                 if (mainTokenTotalSupply < minMainSupplyToExpansion) {
                     mainTokenTotalSupply = minMainSupplyToExpansion;
                 }
-                uint256 _percentage = calculateMaxSupplyExpansionPercent(mainTokenTotalSupply);
+                uint256 _percentage = calcExpansionRate(mainTokenTotalSupply);
                 uint256 _savedForBoardroom = mainTokenTotalSupply.mul(_percentage).div(10000);
                 if (_savedForBoardroom > 0) {
                     uint256 boardRoomAmount = IBoardroom(boardroom).totalSupply();
@@ -391,6 +449,10 @@ contract XMaticTreasury is ContractGuard {
 
     function boardroomAllocateSeigniorage(uint256 amount) external onlyOperator {
         IBoardroom(boardroom).allocateSeigniorage(amount);
+    }
+
+    function toggleUseFixedTwap() external onlyOperator {
+        useFixedTwap = !useFixedTwap;
     }
 
     function computeSupplyDelta() public view returns (bool negative, uint256 supplyDelta, uint256 targetRate) {
