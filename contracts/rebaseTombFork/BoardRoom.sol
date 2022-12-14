@@ -144,11 +144,13 @@ contract Boardroom is ShareWrapper, ContractGuard {
         share = ERC20(_shareToken);
         treasury = ITreasury(_treasury);
         daoFund = _daoFund;
-        MasonrySnapshot memory genesisSnapshot = MasonrySnapshot({time: block.number, rewardReceived: 0, rewardPerShare: 0});
+        MasonrySnapshot memory genesisSnapshot = MasonrySnapshot({time : block.number, rewardReceived : 0, rewardPerShare : 0});
         masonryHistory.push(genesisSnapshot);
 
-        withdrawLockupEpochs = 8; // Lock for 4 epochs (24h) before release withdraw
-        rewardLockupEpochs = 4; // Lock for 2 epochs (12h) before release claimReward
+        withdrawLockupEpochs = 8;
+        // Lock for 4 epochs (24h) before release withdraw
+        rewardLockupEpochs = 4;
+        // Lock for 2 epochs (12h) before release claimReward
 
         initialized = true;
         operator = msg.sender;
@@ -161,7 +163,8 @@ contract Boardroom is ShareWrapper, ContractGuard {
     }
 
     function setLockUp(uint256 _withdrawLockupEpochs, uint256 _rewardLockupEpochs) external onlyOperator {
-        require(_withdrawLockupEpochs >= _rewardLockupEpochs && _withdrawLockupEpochs <= 56, "_withdrawLockupEpochs: out of range"); // <= 2 week
+        require(_withdrawLockupEpochs >= _rewardLockupEpochs && _withdrawLockupEpochs <= 56, "_withdrawLockupEpochs: out of range");
+        // <= 2 week
         withdrawLockupEpochs = _withdrawLockupEpochs;
         rewardLockupEpochs = _rewardLockupEpochs;
     }
@@ -233,7 +236,8 @@ contract Boardroom is ShareWrapper, ContractGuard {
         if (epochTimerStart <= 0) {
             epochTimerStart = 1;
         }
-        masons[msg.sender].epochTimerStart = epochTimerStart; // reset timer
+        masons[msg.sender].epochTimerStart = epochTimerStart;
+        // reset timer
         emit Staked(msg.sender, amount);
     }
 
@@ -246,6 +250,7 @@ contract Boardroom is ShareWrapper, ContractGuard {
     }
 
     function exit() external {
+        require(masons[msg.sender].epochTimerStart.add(withdrawLockupEpochs) <= treasury.epoch(), "Boardroom: still in withdraw lockup");
         claimReward();
         withdraw(balanceOf(msg.sender), getMainTokenPrice());
     }
@@ -254,7 +259,8 @@ contract Boardroom is ShareWrapper, ContractGuard {
         uint256 reward = masons[msg.sender].rewardEarned;
         if (reward > 0) {
             require(masons[msg.sender].epochTimerStart.add(rewardLockupEpochs) <= treasury.epoch(), "Boardroom: still in reward lockup");
-            masons[msg.sender].epochTimerStart = treasury.epoch(); // reset timer
+            masons[msg.sender].epochTimerStart = treasury.epoch();
+            // reset timer
             masons[msg.sender].rewardEarned = 0;
             mainToken.safeTransfer(msg.sender, reward);
             emit RewardPaid(msg.sender, reward);
@@ -269,7 +275,7 @@ contract Boardroom is ShareWrapper, ContractGuard {
         uint256 prevRPS = getLatestSnapshot().rewardPerShare;
         uint256 nextRPS = prevRPS.add(amount.mul(1e18).div(totalSupply()));
 
-        MasonrySnapshot memory newSnapshot = MasonrySnapshot({time: block.number, rewardReceived: amount, rewardPerShare: nextRPS});
+        MasonrySnapshot memory newSnapshot = MasonrySnapshot({time : block.number, rewardReceived : amount, rewardPerShare : nextRPS});
         masonryHistory.push(newSnapshot);
 
         mainToken.safeTransferFrom(msg.sender, address(this), amount);

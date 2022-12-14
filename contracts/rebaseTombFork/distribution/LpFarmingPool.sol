@@ -7,11 +7,9 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-import "./../../interfaces/IAsset.sol";
-
 import "../../Operator.sol";
 
-contract SSXMasterChef is Operator, ReentrancyGuard {
+contract LpFarmingPool is Operator, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
@@ -19,8 +17,7 @@ contract SSXMasterChef is Operator, ReentrancyGuard {
     struct UserInfo {
         uint256 amount; // How many LP tokens the user has provided.
         uint256 rewardDebt; // Reward debt. See explanation below.
-        uint256 depositTs; // Record deposit timestamp
-        uint256 lastSubscriptionTs;
+        uint256 depositTs;
     }
 
     // Info of each pool.
@@ -31,10 +28,11 @@ contract SSXMasterChef is Operator, ReentrancyGuard {
         uint256 accTokenPerShare; // Accumulated token per share, times 1e18. See below.
         bool isStarted; // if lastRewardTime has passed
         uint256 taxRate; // Pool's deposit fee
-        uint256 subscriptionRate; // Charge 0.3% weekly on deposits
+        uint256 lockPeriod;
     }
 
     IERC20 public rewardToken;
+    address public xIndexMinter;
 
     // Info of each pool.
     PoolInfo[] public poolInfo;
@@ -49,39 +47,42 @@ contract SSXMasterChef is Operator, ReentrancyGuard {
     uint256 public poolStartTime;
 
     // The time when token mining ends.
-    uint256 public poolEndTime;
+    uint256 public poolEndTime = 1698854400;
 
     address public daoFund; //All Deposit Fee (if there is) will be sent to DaoFund
     uint256 public constant MIN_TAX_RATE = 0;
     uint256 public constant MAX_TAX_RATE = 400; // Max = 400/10000*100 = 4%
 
-    uint256 public constant MIN_WITHDRAW_TAX_RATE = 200;
-    uint256 public constant MAX_WITHDRAW_TAX_RATE = 500;
-    uint256 public constant WITHDRAW_RATE_STEP = 10; // TAX rate will decrease 0.1% everyday
-
-    uint256 public constant SUBSCRIPTION_PERIOD = 7 days;
-    uint256 public constant MAX_SUBSCRIPTION_FEE = 1000; // Max 10%
-
+    bool initialized = false;
     uint256 public tokenPerSecond;
-    uint256 public runningTime = 1095 days;
-    uint256 public constant TOTAL_REWARDS = 7850000 ether;
+    uint256 public extraRewardFactor = 2;
 
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event EmergencyWithdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event RewardPaid(address indexed user, uint256 amount);
+    event RewardAdded(uint256 amount);
+    event ChangeLockPeriod(uint256 lockPeriod);
 
-    constructor(
+    modifier onlyXIndexMinterOrOperator() {
+        require(msg.sender == xIndexMinter || msg.sender == operator(), "Not allowed");
+        _;
+    }
+
+    function initialize(
         address _rewardToken,
         uint256 _poolStartTime,
-        address _daoFund
-    ) public {
+        address _daoFund,
+        address _xIndexMinter
+    ) external onlyOperator {
+        require(!initialized, "Already initialized");
         require(_rewardToken != address(0), "!token");
+        require(_xIndexMinter != address(0), "!token");
         rewardToken = IERC20(_rewardToken);
         poolStartTime = _poolStartTime;
-        poolEndTime = poolStartTime + runningTime;
-        tokenPerSecond = TOTAL_REWARDS.div(runningTime);
         daoFund = _daoFund;
+        xIndexMinter = _xIndexMinter;
+        initialized = true;
     }
 
     function checkPoolDuplicate(IERC20 _token) internal view {
@@ -98,10 +99,9 @@ contract SSXMasterChef is Operator, ReentrancyGuard {
         bool _withUpdate,
         uint256 _lastRewardTime,
         uint256 _taxRate,
-        uint256 _subscriptionRate
+        uint256 _lockPeriod
     ) public onlyOperator {
         require(_taxRate >= MIN_TAX_RATE && _taxRate <= MAX_TAX_RATE, "Exceed tax rate range");
-        require(_subscriptionRate <= MAX_SUBSCRIPTION_FEE, "Exceed Max subscription fee");
         checkPoolDuplicate(_token);
 
         if (_withUpdate) {
@@ -133,7 +133,7 @@ contract SSXMasterChef is Operator, ReentrancyGuard {
         accTokenPerShare : 0,
         isStarted : _isStarted,
         taxRate : _taxRate,
-        subscriptionRate : _subscriptionRate
+        lockPeriod : _lockPeriod
         }));
         if (_isStarted) {
             totalAllocPoint = totalAllocPoint.add(_allocPoint);
@@ -152,6 +152,12 @@ contract SSXMasterChef is Operator, ReentrancyGuard {
         pool.allocPoint = _allocPoint;
     }
 
+    function setPoolLockPeriod(uint256 _lockPeriod, uint256 _pid) public onlyOperator {
+        PoolInfo storage pool = poolInfo[_pid];
+        pool.lockPeriod = _lockPeriod;
+        emit ChangeLockPeriod(_lockPeriod);
+    }
+
     // Return accumulate rewards over the given _from to _to block.
     function getGeneratedReward(uint256 _fromTime, uint256 _toTime) public view returns (uint256) {
         if (_fromTime >= _toTime) return 0;
@@ -164,6 +170,18 @@ contract SSXMasterChef is Operator, ReentrancyGuard {
             if (_fromTime <= poolStartTime) return _toTime.sub(poolStartTime).mul(tokenPerSecond);
             return _toTime.sub(_fromTime).mul(tokenPerSecond);
         }
+    }
+
+    function setExtraRewardFactor(uint256 _newFactor) external onlyOperator {
+        require(_newFactor <= 10, "Exceed max allow");
+        extraRewardFactor = _newFactor;
+    }
+
+    // View function to see unlock timestamp
+    function getUnlockTime(uint256 _pid, address _user) public view returns (uint256 _unlockTs) {
+        PoolInfo memory pool = poolInfo[_pid];
+        UserInfo memory user = userInfo[_pid][_user];
+        return user.depositTs.add(pool.lockPeriod);
     }
 
     // View function to see pending token on frontend.
@@ -217,15 +235,13 @@ contract SSXMasterChef is Operator, ReentrancyGuard {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_sender];
         updatePool(_pid);
-
         if (user.amount > 0) {
             uint256 _pending = user.amount.mul(pool.accTokenPerShare).div(1e18).sub(user.rewardDebt);
             if (_pending > 0) {
-                sendoutReward(_sender, _pending);
+                safeTokenTransfer(_sender, _pending);
                 emit RewardPaid(_sender, _pending);
             }
         }
-
         if (_amount > 0) {
             uint256 _taxRate = pool.taxRate;
             uint256 _taxAmount = 0;
@@ -238,7 +254,6 @@ contract SSXMasterChef is Operator, ReentrancyGuard {
             pool.token.safeTransferFrom(_sender, daoFund, _taxAmount);
             user.amount = user.amount.add(_amount_post_fee);
             user.depositTs = block.timestamp;
-            user.lastSubscriptionTs = block.timestamp;
         }
         user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(1e18);
         emit Deposit(_sender, _pid, _amount);
@@ -252,36 +267,15 @@ contract SSXMasterChef is Operator, ReentrancyGuard {
         require(user.amount >= _amount, "withdraw: not good");
         updatePool(_pid);
         uint256 _pending = user.amount.mul(pool.accTokenPerShare).div(1e18).sub(user.rewardDebt);
-
-        // Calculate subscription fees
-        uint256 _weeks_unpaid_subscription = calcUnpaidSubscriptionPeriod(user.lastSubscriptionTs);
-        uint256 _subscription_fee = 0;
-        if (_weeks_unpaid_subscription >= 1) {
-            _subscription_fee = user.amount.mul(pool.subscriptionRate).div(10000).mul(_weeks_unpaid_subscription);
-            pool.token.safeTransfer(daoFund, _subscription_fee);
-            user.lastSubscriptionTs = user.lastSubscriptionTs.add(_weeks_unpaid_subscription.mul(SUBSCRIPTION_PERIOD));
-            user.amount = user.amount.sub(_subscription_fee);
-            _amount = _amount.sub(_subscription_fee);
-        }
-
-        // Calculate Reward and pay
         if (_pending > 0) {
-            sendoutReward(_sender, _pending);
+            safeTokenTransfer(_sender, _pending);
             emit RewardPaid(_sender, _pending);
         }
-
+        // Can withdraw will be enabled to token pool only, the pool will lockup token and remove it from circulating supply
         if (_amount > 0) {
-            uint256 _taxAmount = 0;
-            if (pool.taxRate > 0) {
-                uint256 _taxRate = calcTaxRate(user.depositTs);
-                _taxAmount = user.amount.sub(_taxAmount).div(10000);
-            }
+            require(user.depositTs.add(pool.lockPeriod) <= block.timestamp, "Still in lock");
             user.amount = user.amount.sub(_amount);
-            if (_taxAmount > 0) {
-                pool.token.safeTransfer(daoFund, _taxAmount);
-            }
-            pool.token.safeTransfer(_sender, _amount.sub(_taxAmount));
-
+            pool.token.safeTransfer(_sender, _amount);
         }
         user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(1e18);
         emit Withdraw(_sender, _pid, _amount);
@@ -291,7 +285,7 @@ contract SSXMasterChef is Operator, ReentrancyGuard {
     function emergencyWithdraw(uint256 _pid) public nonReentrant {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
-        require(_pid != 0, "XSHIP pool can not be withdrawn");
+        require(user.depositTs.add(pool.lockPeriod) <= block.timestamp, "Still in lock");
         uint256 _amount = user.amount;
         user.amount = 0;
         user.rewardDebt = 0;
@@ -299,30 +293,23 @@ contract SSXMasterChef is Operator, ReentrancyGuard {
         emit EmergencyWithdraw(msg.sender, _pid, _amount);
     }
 
-    function calcUnpaidSubscriptionPeriod(uint256 _lastSubscriptionTs) public view returns (uint256 _weeks_unpaid) {
-        uint256 _ts_since_last_paid = block.timestamp.sub(_lastSubscriptionTs);
-        _weeks_unpaid = _ts_since_last_paid.div(SUBSCRIPTION_PERIOD);
-    }
-
     // Safe token transfer function, just in case if rounding error causes pool to not have enough token.
-    function sendoutReward(address _to, uint256 _amount) internal {
-        // Mint new reward tokens and send to users
-        IAsset(address(rewardToken)).poolMint(_to, _amount);
-        //        uint256 _tokenBal = rewardToken.balanceOf(address(this));
-        //        if (_tokenBal > 0) {
-        //            if (_amount > _tokenBal) {
-        //                rewardToken.safeTransfer(_to, _tokenBal);
-        //            } else {
-        //                rewardToken.safeTransfer(_to, _amount);
-        //            }
-        //        }
+    function safeTokenTransfer(address _to, uint256 _amount) internal {
+        uint256 _tokenBal = rewardToken.balanceOf(address(this));
+        if (_tokenBal > 0) {
+            if (_amount > _tokenBal) {
+                rewardToken.safeTransfer(_to, _tokenBal);
+            } else {
+                rewardToken.safeTransfer(_to, _amount);
+            }
+        }
     }
 
-    function calcTaxRate(uint256 _depositTs) public view returns (uint256 _taxRate) {
-        uint256 _deposited_period = block.timestamp.sub(_depositTs);
-        uint256 _days_deposited = _deposited_period.div(86400);
-        _taxRate = MAX_WITHDRAW_TAX_RATE.sub(_days_deposited.mul(WITHDRAW_RATE_STEP));
-        if (_taxRate < MIN_WITHDRAW_TAX_RATE) _taxRate = MIN_WITHDRAW_TAX_RATE;
+    function addReward(uint256 _amount) external onlyXIndexMinterOrOperator {
+        uint256 poolRunningTime = poolEndTime.sub(block.timestamp);
+        uint256 extraRewardPerSec = _amount.div(poolRunningTime).mul(extraRewardFactor);
+        tokenPerSecond = tokenPerSecond.add(extraRewardPerSec);
+        emit RewardAdded(_amount);
     }
 
     function updateRewardPerSec(uint256 _new_xTokenPerSec) public onlyOperator {

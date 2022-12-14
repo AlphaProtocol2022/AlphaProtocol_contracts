@@ -202,6 +202,8 @@ contract XMaticTreasury is ContractGuard {
         daoFund = _daoFund;
         devFund = _devFund;
         startTime = _startTime;
+        epoch = _epoch;
+        previousEpoch = epoch.sub(1);
 
         mainTokenPriceOne = 10 ** 18;
         // This is to allow a PEG of 1 MainToken per USDC
@@ -376,19 +378,25 @@ contract XMaticTreasury is ContractGuard {
         uint256 max_expansion = calculateMaxSupplyExpansionPercent(_mainTokenSupply);
         uint256 min_expansion = calculateMinSupplyExpansionPercent(_mainTokenSupply);
         uint256 twap = getMainTokenPrice();
-        uint256 twap_delta = twap.sub(mainTokenPriceOne);
-        uint256 average_rate = (max_expansion.add(min_expansion)).div(2);
-        //        _percent = twap_delta.mul(1e6).div(TWAP_DELTA_FOR_MAX_EXPANSION).mul(average_rate).add(min_expansion);
-        _percent = average_rate.mul(1e18).div(TWAP_DELTA_FOR_MAX_EXPANSION).mul(twap_delta).div(1e18);
-        _percent = _percent.add(min_expansion);
 
-        if (_percent < min_expansion) {
-            _percent = min_expansion;
+        if (twap <= mainTokenPriceOne) {
+            _percent = 0;
+        } else {
+            uint256 twap_delta = twap.sub(mainTokenPriceOne);
+            uint256 average_rate = (max_expansion.add(min_expansion)).div(2);
+            //        _percent = twap_delta.mul(1e6).div(TWAP_DELTA_FOR_MAX_EXPANSION).mul(average_rate).add(min_expansion);
+            _percent = average_rate.mul(1e18).div(TWAP_DELTA_FOR_MAX_EXPANSION).mul(twap_delta).div(1e18);
+            _percent = _percent.add(min_expansion);
+
+            if (_percent < min_expansion) {
+                _percent = min_expansion;
+            }
+
+            if (_percent > max_expansion) {
+                _percent = max_expansion;
+            }
         }
 
-        if (_percent > max_expansion) {
-            _percent = max_expansion;
-        }
     }
 
     function calcExpansionRate(uint256 _mainTokenSupply) public view returns(uint256 _expansion_rate) {

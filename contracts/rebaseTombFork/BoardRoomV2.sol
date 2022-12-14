@@ -172,6 +172,18 @@ contract BoardroomV2 is ShareWrapper, ContractGuard, ReentrancyGuard {
         treasury = ITreasury(_treasury);
     }
 
+    function setStakeFee(uint256 _stakeFee) external onlyOperator {
+        require(_stakeFee <= 1000, "Exceed max fee");
+        // max 10%
+        stakeFee = _stakeFee;
+    }
+
+    function setWithdrawFee(uint256 _withdrawFee) external onlyOperator {
+        require(_withdrawFee <= 1000, "Exceed max fee");
+        // max 10%
+        withdrawFee = _withdrawFee;
+    }
+
     /* ========== VIEW FUNCTIONS ========== */
 
     // =========== Snapshot getters
@@ -292,12 +304,12 @@ contract BoardroomV2 is ShareWrapper, ContractGuard, ReentrancyGuard {
         }
         ERC20(spaceUsdcLp).safeTransfer(msg.sender, amount.sub(fee));
 
-//        if (amount == lp_owned) {
-//            uint256 dust = receipt_staked.sub(receipt_burnt);
-//            if (dust > 0) {
-//                share.safeTransfer(daoFund, dust);
-//            }
-//        }
+        //        if (amount == lp_owned) {
+        //            uint256 dust = receipt_staked.sub(receipt_burnt);
+        //            if (dust > 0) {
+        //                share.safeTransfer(daoFund, dust);
+        //            }
+        //        }
         // ---
 
         // Get 2% fee when protocol in contraction phase
@@ -306,6 +318,7 @@ contract BoardroomV2 is ShareWrapper, ContractGuard, ReentrancyGuard {
     }
 
     function exit() external nonReentrant {
+        require(masons[msg.sender].epochTimerStart.add(withdrawLockupEpochs) <= treasury.epoch(), "Boardroom: still in withdraw lockup");
         (uint256 lp_owned, uint256 receipt_staked) = getSpaceUsdcLpOwned(msg.sender);
         share.safeApprove(yieldWolfVault, 0);
         share.safeApprove(yieldWolfVault, receipt_staked);
